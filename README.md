@@ -9,6 +9,8 @@
 - **Rich PDF Output:** Generates valid PDF 1.4 documents with outlines and internal links.
 - **Base14 Fonts:** Built-in support for Courier, Helvetica, and Times-Roman.
 - **Native Image Passthrough:** Supports JPEG and PNG embedding.
+- **Architecture Agnostic:** Cross-compiles beautifully to RISC-V, x86_64, and ARM with zero code changes.
+
 
 ## Quick Start
 
