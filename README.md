@@ -1,4 +1,4 @@
-# TXT2PDF (v1.7) - THE SPARTAN PDF GENERATOR
+# TXT2PDF (v1.7.1) - THE SPARTAN PDF GENERATOR
 
 `txt2pdf` is a zero-dependency, command-line utility written in pure C11 that converts plain text files into structured PDF 1.4 documents.
 
