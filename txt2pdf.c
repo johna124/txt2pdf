@@ -30,7 +30,7 @@
 
 
 /*
- * txt2pdf.c v1.7
+ * txt2pdf.c v1.7.1
  *
  * Simple TXT to PDF converter in pure C.
  *
@@ -40,14 +40,17 @@
  * - Creates PDF bookmarks (outline) for numbered sections.
  * - Creates internal links in the TOC.
  *
+ * Changes v1.7.1:
+ * - Improved winansi char detection
+ *
  * Changes v1.7:
-* - Added --sans, --serif and --mono options for Base14 fonts.
-* - Added [IMG]file.jpg[/IMG] and [IMG]file.png[/IMG] block images.
-* - JPEG images are embedded with native /DCTDecode passthrough.
-* - Simple PNG images are embedded with /FlateDecode PNG predictor.
-* - Proportional fonts use built-in ASCII metrics for wrapping.
-*
-* Changes v1.6:
+ * - Added --sans, --serif and --mono options for Base14 fonts.
+ * - Added [IMG]file.jpg[/IMG] and [IMG]file.png[/IMG] block images.
+ * - JPEG images are embedded with native /DCTDecode passthrough.
+ * - Simple PNG images are embedded with /FlateDecode PNG predictor.
+ * - Proportional fonts use built-in ASCII metrics for wrapping.
+ *
+ * Changes v1.6:
  * - CRITICAL FIX: parse_section_line_dyn() now captures complete
  *   hierarchical IDs (2.3, 11.14, 13.1b, 26.5a, 2.0a, etc.).
  *   Previously only captured the first number ("2" for "2.3 ..."),
@@ -243,6 +246,7 @@ static void str_appendf(Str *s, const char *fmt, ...)
 /* ========================================================================
  * 2. 'pdf_escape' function (Smart Decoder)
  * ======================================================================== */
+static int v17_decode_utf8(const unsigned char *p, size_t off, size_t len, int *cp, size_t *consume);
 
 static void pdf_escape(const char *s, Str *out)
 {
@@ -257,15 +261,19 @@ static void pdf_escape(const char *s, Str *out)
     }
 
     const unsigned char *p = (const unsigned char *)s;
+    size_t total_len = strlen(s);
 
     while (*p) {
         unsigned char c = *p;
+        size_t offset = (size_t)(p - (const unsigned char *)s);
 
-        /* Dynamic UTF-8 -> WinAnsiEncoding translation */
-        if (g_is_utf8 && c >= 0xC2 && c <= 0xDF) {
-            unsigned char c2 = p[1];
-            if (c2 >= 0x80 && c2 <= 0xBF) {
-                int cp = ((c & 0x1F) << 6) | (c2 & 0x3F);
+        /* Modificado: Si es un inicio de cualquier secuencia UTF-8 (c >= 0x80) */
+        if (g_is_utf8 && c >= 0x80) {
+            int cp = 0;
+            size_t cons = 1;
+            
+            /* Usamos tu decodificador del parche v1.7 que sabe leer 2, 3 y 4 bytes */
+            if (v17_decode_utf8(p, 0, total_len - offset, &cp, &cons)) {
                 unsigned char winansi = 0;
 
                 switch (cp) {
@@ -285,15 +293,23 @@ static void pdf_escape(const char *s, Str *out)
                     case 0x00DC: winansi = 0xDC; break; /* Ü */
                     case 0x00BF: winansi = 0xBF; break; /* ¿ */
                     case 0x00A1: winansi = 0xA1; break; /* ¡ */
+                    case 0x2019: winansi = 0x27; break; /* ’ -> ASCII ' */
+                    case 0x2018: winansi = 0x27; break; /* ‘ -> ASCII ' */
+                    case 0x201C: winansi = 0x22; break; /* “ -> ASCII " */
+                    case 0x201D: winansi = 0x22; break; /* ” -> ASCII " */
+                    case 0x2014: winansi = 0x97; break; /* Raya larga — -> WinAnsi 0x97 */
+                    case 0x2026: winansi = 0x85; break; /* Elipsis … -> WinAnsi 0x85 */
+                    case 0x20AC: winansi = 0x88; break; /* Euro € -> WinAnsi 0x88 */
                     default:     winansi = '?';  break;
                 }
 
                 str_append_char(out, (char)winansi);
-                p += 2;
+                p += cons; /* Avanzamos dinámicamente los bytes reales consumidos (2, 3 o 4) */
                 continue;
             }
         }
 
+        /* Tu procesamiento ASCII estándar intacto */
         if      (c == '\\') str_append_str(out, "\\\\");
         else if (c == '(')  str_append_str(out, "\\(");
         else if (c == ')')  str_append_str(out, "\\)");
@@ -306,6 +322,7 @@ static void pdf_escape(const char *s, Str *out)
         p++;
     }
 }
+
 
 /* ========================================================================
  * Text and calculation utilities
@@ -897,6 +914,9 @@ static unsigned char v17_winansi_from_cp(int cp)
 
     if (cp >= 0xA0 && cp <= 0xFF)
         return (unsigned char)cp;
+
+    if (cp == 0x2018 || cp == 0x2019) return 0x27; /* ‘ or ’ -> ASCII ' */
+    if (cp == 0x201C || cp == 0x201D) return 0x22; /* “ or ” -> ASCII " */
 
     return '?';
 }
@@ -1774,8 +1794,31 @@ int main(int argc, char **argv)
             continue;
         }
 
-        const char *s = lines[i];
-        size_t slen = strlen(s);
+
+        /* ---- Expansión dinámica de tabuladores (\t) a bloques de 4 espacios ---- */
+        Str clean_line;
+        str_init(&clean_line);
+        const char *orig_s = lines[i];
+        size_t visual_col = 0;
+
+        while (*orig_s) {
+            if (*orig_s == '\t') {
+                size_t spaces_needed = 4 - (visual_col % 4);
+                for (size_t s_idx = 0; s_idx < spaces_needed; s_idx++) {
+                    str_append_char(&clean_line, ' ');
+                }
+                visual_col += spaces_needed;
+            } else {
+                str_append_char(&clean_line, *orig_s);
+                if (!g_is_utf8 || (*orig_s & 0xC0) != 0x80) {
+                    visual_col++;
+                }
+            }
+            orig_s++;
+        }
+
+        const char *s = clean_line.data;
+        size_t slen = clean_line.len;
         size_t off = 0;
         int first = 1, emitted = 0;
 
@@ -1840,7 +1883,9 @@ int main(int argc, char **argv)
             emitted = 1;
             line_on_page++;
         }
+        str_free(&clean_line); /* Liberamos la memoria de la línea auxiliar expandida */
     }
+
 
     int total_pages = current_page;
     if (total_pages < 1)
@@ -2065,7 +2110,7 @@ int main(int argc, char **argv)
         str_free(&xobjs);
     }
 
-    /* Content streams */
+        /* Content streams */
     for (int p = 1; p <= total_pages; p++) {
         int content_obj = first_content_obj + p - 1;
 
@@ -2093,9 +2138,26 @@ int main(int argc, char **argv)
                 vis[vi].text[0]) {
                 v17_pdf_escape(vis[vi].text, &esc);
 
+                /* --- CALCULAR SANGRADO AUTOMÁTICO PARA EL ÍNDICE (TOC) --- */
+                double current_margin = MARGIN;
+                int line_idx = vis[vi].orig_line;
+                
+                if (toc_map[line_idx] && candidate_map[line_idx] >= 0) {
+                    int target_sec = cands[candidate_map[line_idx]].target;
+                    if (target_sec >= 0 && sections[target_sec].id) {
+                        int dots = 0;
+                        char *id_ptr = sections[target_sec].id;
+                        while (*id_ptr) {
+                            if (*id_ptr == '.') dots++;
+                            id_ptr++;
+                        }
+                        current_margin += (double)dots * 15.0;
+                    }
+                }
+
                 str_appendf(&content,
                             "BT /F1 %.1f Tf %.2f %.2f Td (%s) Tj ET\n",
-                            FONT_SIZE, MARGIN, vis[vi].y,
+                            FONT_SIZE, current_margin, vis[vi].y,
                             esc.data ? esc.data : "");
             }
         }
@@ -2115,6 +2177,7 @@ int main(int argc, char **argv)
 
         str_free(&content);
     }
+
 
     /* Outline items */
     for (int j = 0; j < K; j++) {

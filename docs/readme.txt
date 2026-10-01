@@ -1,5 +1,5 @@
 ==============================================================================
-TXT2PDF V1.7 - THE SPARTAN PDF GENERATOR
+TXT2PDF V1.7.1 - THE SPARTAN PDF GENERATOR
 Zero-dependency TXT to PDF converter in pure C11
 ==============================================================================
 
@@ -8,7 +8,7 @@ Zero-dependency TXT to PDF converter in pure C11
 Language:   C11 (pure, no C++ runtime, no external libs)
 Binary:     Static, stripped, musl libc, tiny
 Output:     PDF 1.4 with outlines, internal links, Base14 fonts, images
-Status:     v1.7 feature release
+Status:     v1.7.1 feature release
 
 ==============================================================================
 QUICK START
@@ -44,7 +44,7 @@ QUICK START
 ==============================================================================
 
 1.  what is txt2pdf?
-2.  what is new in v1.7?
+2.  what is new in v1.7.1?
 3.  fonts and typography
 4.  image support
 5.  parser rules
@@ -76,8 +76,9 @@ It is designed for environments where installing dependencies is impossible,
 unwanted, or where the network is down.
 
 ==============================================================================
-2. WHAT IS NEW IN V1.7?
+2. WHAT IS NEW IN V1.7.1?
 ==============================================================================
+Version 1.7.1 adds better winansi char detection 
 
 Version 1.7 adds the two most requested Spartan features:
 
