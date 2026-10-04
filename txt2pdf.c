@@ -30,7 +30,7 @@
 
 
 /*
- * txt2pdf.c v1.7
+ * txt2pdf.c v1.7.1
  *
  * Simple TXT to PDF converter in pure C.
  *
