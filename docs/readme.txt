@@ -1,5 +1,5 @@
 ==============================================================================
-TXT2PDF V1.7.1 - THE SPARTAN PDF GENERATOR
+TXT2PDF V1.7.2 - THE SPARTAN PDF GENERATOR
 Zero-dependency TXT to PDF converter in pure C11
 ==============================================================================
 
@@ -7,8 +7,9 @@ Zero-dependency TXT to PDF converter in pure C11
 
 Language:   C11 (pure, no C++ runtime, no external libs)
 Binary:     Static, stripped, musl libc, tiny
-Output:     PDF 1.4 with outlines, internal links, Base14 fonts, images
-Status:     v1.7.1 feature release
+Output:     PDF 1.4 with outlines, internal links, Base14 fonts,
+            optional embedded Unicode TrueType fonts, images
+Status:     v1.7.2 feature release
 
 ==============================================================================
 QUICK START
@@ -16,35 +17,39 @@ QUICK START
 
 - Compile with the provided script:
 
-  ./compile.sh
+    ./compile.sh
 
 - Compile manually with musl:
 
-  musl-gcc -Os -Wall -Wextra -std=c11 -static -o txt2pdf txt2pdf.c
-  strip txt2pdf
+    musl-gcc -Os -Wall -Wextra -std=c11 -static -o txt2pdf txt2pdf.c
+    strip txt2pdf
 
 - Run with default Courier font:
 
-  ./txt2pdf readme.txt readme.pdf
+    ./txt2pdf readme.txt readme.pdf
 
 - Run with Helvetica:
 
-  ./txt2pdf --sans readme.txt readme.pdf
+    ./txt2pdf --sans readme.txt readme.pdf
 
 - Run with Times-Roman:
 
-  ./txt2pdf --serif readme.txt readme.pdf
+    ./txt2pdf --serif readme.txt readme.pdf
+
+- Run with an embedded Unicode TrueType font:
+
+    ./txt2pdf --font NotoSansJP-Regular.ttf readme.txt readme.pdf
 
 - Run with debug diagnostics:
 
-  ./txt2pdf --debug readme.txt readme.pdf
+    ./txt2pdf --debug readme.txt readme.pdf
 
 ==============================================================================
 [TOC] TABLE OF CONTENTS
 ==============================================================================
 
 1.  what is txt2pdf?
-2.  what is new in v1.7.1?
+2.  what is new in v1.7.2?
 3.  fonts and typography
 4.  image support
 5.  parser rules
@@ -76,62 +81,79 @@ It is designed for environments where installing dependencies is impossible,
 unwanted, or where the network is down.
 
 ==============================================================================
-2. WHAT IS NEW IN V1.7.1?
+2. WHAT IS NEW IN V1.7.2?
 ==============================================================================
-Version 1.7.1 adds better winansi char detection 
 
-Version 1.7 adds the two most requested Spartan features:
-
-- Base14 font selection.
-- Standalone block images.
+Version 1.7.2 adds optional Unicode font support for Japanese, Chinese,
+Korean and other scripts covered by the selected TrueType font.
 
 Main changes:
 
-- Added --sans, --serif and --mono options.
-- Added Helvetica and Times-Roman Base14 font support.
-- Added proportional text wrapping using built-in ASCII metrics.
-- Added [IMG]...[/IMG] standalone image support.
-- Added JPEG passthrough using native PDF DCTDecode.
-- Added simple PNG passthrough using native PDF FlateDecode.
-- Added debug diagnostics for detected images.
-- Kept the project dependency-free and single-file friendly.
+- Added --font FILE.ttf mode.
+- Added embedded TrueType font support.
+- Added Unicode CJK output using PDF Type0 / CIDFontType2.
+- Added /Identity-H encoding.
+- Added /ToUnicode maps for copy, paste and search.
+- Added real glyph metrics from the TTF for line wrapping.
+- Added UTF-16BE bookmark titles for CJK outlines.
+- Added automatic TrueType subsetting.
+- Kept the classic Base14 mode unchanged when --font is not used.
+
+Example size impact:
+
+- Full Noto Sans JP embedded: ~5 MB PDF
+- Same document with v1.7.2 subsetting: ~75 KB PDF
 
 The default behavior remains unchanged:
 
 - Courier is still the default font.
-- Existing v1.6 documents should convert exactly as before.
-- Images and proportional fonts are opt-in features.
+- Existing v1.7.1 documents convert exactly as before.
+- CJK mode and subsetting are opt-in features.
 
 ==============================================================================
 3. FONTS AND TYPOGRAPHY
 ==============================================================================
 
-txt2pdf v1.7 supports the standard PDF Base14 font families.
+txt2pdf v1.7.2 supports two font pipelines.
 
-Available options:
+A. Base14 fonts (classic mode):
 
-- --mono
-    Use Courier. This is the default and the classic txt2pdf layout.
+    --mono     Courier (default, classic txt2pdf layout)
+    --sans     Helvetica (clean, modern, proportional)
+    --serif    Times-Roman (classic documentation look)
 
-- --sans
-    Use Helvetica. This gives a clean, modern, proportional look.
+    Examples:
 
-- --serif
-    Use Times-Roman. This gives a classic documentation look.
+        ./txt2pdf --mono input.txt output.pdf
+        ./txt2pdf --sans input.txt output.pdf
+        ./txt2pdf --serif input.txt output.pdf
 
-Examples:
+    Important notes:
 
-    ./txt2pdf --mono input.txt output.pdf
-    ./txt2pdf --sans input.txt output.pdf
-    ./txt2pdf --serif input.txt output.pdf
+    - Base14 fonts are not embedded into the PDF.
+    - PDF viewers normally provide built-in substitutes.
+    - Courier layout remains fixed-width and highly predictable.
+    - Helvetica and Times-Roman use built-in ASCII metrics for wrapping.
+    - Accents and non-ASCII characters remain limited to WinAnsiEncoding.
 
-Important notes:
+B. Embedded TrueType font (CJK mode):
 
-- Base14 fonts are not embedded into the PDF.
-- PDF viewers normally provide built-in substitutes for Base14 fonts.
-- Courier layout remains fixed-width and highly predictable.
-- Helvetica and Times-Roman use built-in ASCII metrics for line wrapping.
-- Accents and non-ASCII characters remain limited to WinAnsiEncoding.
+    --font FILE.ttf
+
+    Examples:
+
+        ./txt2pdf --font NotoSansJP-Regular.ttf roadmap.txt roadmap.pdf
+        ./txt2pdf --font NotoSansSC-Regular.ttf input.txt output.pdf
+        ./txt2pdf --font NotoSansKR-Regular.ttf input.txt output.pdf
+
+    Important notes:
+
+    - The font must be an individual TrueType .ttf file.
+    - OpenType/CFF .otf files are not supported yet.
+    - TrueType collections .ttc are not supported yet.
+    - When --font is used, it overrides --sans, --serif and --mono.
+    - The selected font is used for ALL text (ASCII, Latin, CJK).
+    - Only the glyphs actually used in the document are embedded.
 
 ==============================================================================
 4. IMAGE SUPPORT
@@ -141,27 +163,24 @@ txt2pdf v1.7 supports standalone block images.
 
 Supported image tags:
 
-- [IMG]photo.jpg[/IMG]
-- [IMG]diagram.jpeg[/IMG]
-- [IMG]chart.png[/IMG]
+    [IMG]photo.jpg[/IMG]
+    [IMG]diagram.jpeg[/IMG]
+    [IMG]chart.png[/IMG]
 
 The image line must be the only content on that line.
 
 Good image line:
 
-- [IMG]chart.png[/IMG]
+    [IMG]chart.png[/IMG]
 
 Bad image line:
 
-- See this chart: [IMG]chart.png[/IMG]
+    See this chart: [IMG]chart.png[/IMG]
 
 Supported formats:
 
-- JPEG
-    Embedded using PDF native DCTDecode passthrough.
-
-- PNG
-    Embedded using a minimalist passthrough for simple PNG files.
+- JPEG: Embedded using PDF native DCTDecode passthrough.
+- PNG: Embedded using a minimalist passthrough for simple PNG files.
 
 Supported PNG types:
 
@@ -263,6 +282,7 @@ Font selection:
     ./txt2pdf --mono input.txt output.pdf
     ./txt2pdf --sans input.txt output.pdf
     ./txt2pdf --serif input.txt output.pdf
+    ./txt2pdf --font FILE.ttf input.txt output.pdf
 
 Debug usage:
 
@@ -271,6 +291,7 @@ Debug usage:
 Combined usage:
 
     ./txt2pdf --debug --sans input.txt output.pdf
+    ./txt2pdf --debug --font NotoSansJP-Regular.ttf input.txt output.pdf
 
 Debug mode prints diagnostics to stderr.
 
@@ -284,6 +305,7 @@ It reports:
 - detected internal links
 - detected images
 - image placements
+- CJK glyph count and subset size (in CJK mode)
 
 Use debug mode when:
 
@@ -291,6 +313,7 @@ Use debug mode when:
 - too many bookmarks appear
 - a contents entry does not link anywhere
 - an image does not appear
+- CJK characters render as boxes or ?
 - you are adapting a new readme to the Spartan format
 
 ==============================================================================
@@ -335,6 +358,9 @@ Fonts:
 Generates a Base14 Type1 font object. The default is Courier. The --sans
 and --serif options switch to Helvetica or Times-Roman.
 
+In CJK mode, it generates a Type0 font tree with a CIDFontType2 descendant,
+an embedded FontFile2 stream (subsetted TTF), and a ToUnicode CMap.
+
 Images:
 
 Loads image metadata, reserves vertical layout space, writes image XObject
@@ -345,10 +371,15 @@ Encoding and Smart Decoder:
 Auto-detects UTF-8 vs Latin-1. If UTF-8 is detected, a smart decoder
 translates supported multi-byte sequences to WinAnsiEncoding.
 
+In CJK mode, UTF-8 codepoints are mapped directly to glyph IDs from the
+embedded TrueType font, and the content stream uses hexadecimal notation
+with Identity-H encoding.
+
 Outlines:
 
 Generates a linked list of PDF Outline objects pointing to the exact XYZ
-coordinates of each uppercase header.
+coordinates of each uppercase header. In CJK mode, outline titles use
+UTF-16BE hex encoding so they display CJK characters correctly.
 
 Annotations:
 
@@ -371,6 +402,7 @@ Typical layout:
 - txt2pdf.c
 - compile.sh
 - readme.txt
+- README.md
 
 The main C file contains:
 
@@ -380,7 +412,8 @@ The main C file contains:
 - header detection
 - contents detection
 - image loading
-- font selection
+- font selection (Base14 and TrueType)
+- TrueType subsetting
 - page break calculation
 - PDF object generation
 - binary stream writing
@@ -424,6 +457,8 @@ Expected:
 12. KNOWN LIMITATIONS
 ==============================================================================
 
+General:
+
 - No external URL hyperlinks.
 - No custom page sizes.
 - No custom margins.
@@ -432,14 +467,31 @@ Expected:
 - No image captions.
 - No repeated header/footer images.
 - No per-image width, height, DPI, or centering attributes yet.
+
+Images:
+
 - PNG support is limited to simple 8-bit non-interlaced images.
 - PNG alpha transparency is not supported.
 - Interlaced PNGs are not supported.
+
+Base14 mode:
+
 - WinAnsiEncoding only.
 - Characters outside WinAnsi are replaced with '?'.
+- Base14 fonts are not embedded.
+
+CJK mode:
+
+- Requires an individual TrueType .ttf file.
+- OpenType/CFF .otf files are not supported yet.
+- TrueType collections .ttc are not supported yet.
+- No automatic per-script font fallback.
+- Scripts requiring shaping (Arabic, Indic, Thai) are not supported.
+
+Parser:
+
 - Section headers must be fenced by separator lines.
 - Internal links are only generated from contents blocks.
-- Base14 fonts are not embedded.
 
 ==============================================================================
 13. TROUBLESHOOTING
@@ -468,11 +520,27 @@ Extra bookmarks:
 - An example header is surrounded by separator lines.
 - Remove the separators around examples or rewrite the example line.
 
-Garbled characters:
+Garbled characters in Base14 mode:
 
 - Ensure your text editor saves the file in UTF-8.
 - Run with --debug to verify the detected encoding.
 - Characters outside WinAnsiEncoding cannot be rendered.
+- Use --font FILE.ttf for full Unicode support.
+
+CJK characters appear as boxes or '?' in CJK mode:
+
+- The .ttf file does not contain the requested glyphs.
+- Use a font with broader coverage (e.g. Noto Sans SC for Simplified
+  Chinese, Noto Sans TC for Traditional Chinese, Noto Sans JP for
+  Japanese, Noto Sans KR for Korean).
+- Check that the file is a real .ttf, not .otf or .ttc.
+
+Cannot load TTF font error:
+
+- The file is not in the current directory. Use absolute path.
+- The file is .otf (CFF) instead of .ttf (TrueType).
+- The file is a .ttc collection (not supported yet).
+- The file is corrupted or incomplete.
 
 Image does not appear:
 
@@ -492,6 +560,7 @@ Font does not look as expected:
 - Use --mono for the classic Courier layout.
 - Use --sans for Helvetica.
 - Use --serif for Times-Roman.
+- Use --font FILE.ttf for Unicode CJK layout.
 - Some viewers substitute Base14 fonts with similar fonts.
 
 Debug output is the fastest way to diagnose the problem.
