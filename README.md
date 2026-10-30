@@ -231,7 +231,7 @@ Same input produces the same output hash every time.
 | Architecture | Size |
 | --- | --- |
 | amd64 | ~117 KB |
-| arm64 | ~1122 KB |
+| arm64 | ~122 KB |
 | riscv64 | ~102 KB |
 
 RISC-V is usually the smallest thanks to RVC (compressed 16-bit instructions).
