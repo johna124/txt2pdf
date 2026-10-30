@@ -1,20 +1,25 @@
 ==============================================================================
-TXT2PDF V1.8.0 - THE SPARTAN PDF GENERATOR
+TXT2PDF V1.9.0 - THE SPARTAN PDF GENERATOR
 Zero-dependency TXT to PDF converter in pure C11
-Now with zlib stream compression via libdeflate
+Now with native PDF 1.5 object streams
 ==============================================================================
 
 "Turn plain text into structured PDFs without asking for permission.
-Now the streams come out squeezed."
+Now the objects come out folded."
 
-Language:    C11 (pure, no C++ runtime)
-Compression: libdeflate (zlib / FlateDecode), statically embedded,
-             enabled by default at level 12
-Binary:      Static, stripped, musl libc, ~90-110 KB (architecture dependent)
-Output:      PDF 1.4 with outlines, internal links, Base14 fonts,
-             optional embedded Unicode TrueType fonts, images,
-             zlib-compressed streams, and clickable URL links
-Status:      v1.8.0 feature release
+Language:       C11 (pure, no C++ runtime)
+Compression:    libdeflate (zlib / FlateDecode), statically embedded,
+                enabled by default at level 12
+PDF version:    PDF 1.5 by default (PDF 1.4 with --pdf14)
+Object streams: enabled by default; disable with --object-streams=disable
+Binary:         Static, stripped, musl libc, ~90-110 KB
+                (architecture dependent)
+Output:         PDF 1.5 by default (PDF 1.4 with --pdf14) with outlines,
+                internal links, Base14 fonts, optional embedded Unicode
+                TrueType fonts, images, zlib-compressed streams, native
+                object streams, native cross-reference streams, and
+                clickable URL links
+Status:         v1.9.0 feature release
 
 ==============================================================================
 QUICK START
@@ -23,10 +28,20 @@ QUICK START
 - Compile with the provided script (builds libdeflate and txt2pdf):
     ./compile.sh
 
-- Run with defaults (Courier font, zlib compression level 12):
+- Run with defaults (PDF 1.5 + object streams, Courier font,
+  zlib compression level 12):
     ./txt2pdf readme.txt readme.pdf
 
-- Disable compression (classic v1.7.2 output):
+- Run legacy PDF 1.4 output:
+    ./txt2pdf --pdf14 readme.txt readme.pdf
+
+- Disable object streams:
+    ./txt2pdf --object-streams=disable readme.txt readme.pdf
+
+- Force object streams explicitly:
+    ./txt2pdf --object-streams=generate readme.txt readme.pdf
+
+- Disable compression (classic v1.7.2 stream behavior):
     ./txt2pdf --no-compress readme.txt readme.pdf
 
 - Choose a compression level (1 fastest ... 12 smallest):
@@ -52,30 +67,31 @@ QUICK START
 [TOC] TABLE OF CONTENTS
 ==============================================================================
 
-1.  what is txt2pdf?
-2.  what is new in v1.8.0?
-3.  fonts and typography
-4.  stream compression (libdeflate)
-5.  url links
-6.  image support
-7.  parser rules
-8.  table of contents rules
-9.  usage and debug mode
-10. minimal working structure
-11. pdf internals
-12. project structure
-13. building and static cookbook
-14. known limitations
-15. troubleshooting
-16. design philosophy
-17. license and credits
+1.what is txt2pdf?
+2.what is new in v1.9.0?
+3.fonts and typography
+4.stream compression (libdeflate)
+5.url links
+6.image support
+7.parser rules
+8.table of contents rules
+9.usage and debug mode
+10.minimal working structure
+11.pdf internals
+12.project structure
+13.building and static cookbook
+14.known limitations
+15.troubleshooting
+16.design philosophy
+17.license and credits
 
 ==============================================================================
 1. WHAT IS TXT2PDF?
 ==============================================================================
 
 txt2pdf is a zero-dependency command-line utility that converts plain text
-files into structured PDF 1.4 documents.
+files into structured PDF 1.5 documents by default. Legacy PDF 1.4 output
+is still available with --pdf14.
 
 Unlike Pandoc, wkhtmltopdf, or Python-based converters that require hundreds
 of megabytes of runtime dependencies, txt2pdf is a small static binary.
@@ -85,46 +101,75 @@ the streams with zlib (libdeflate), and writes the final binary stream
 directly to disk using only the C standard library plus the statically
 embedded libdeflate compressor.
 
+Since v1.9.0, txt2pdf can generate native PDF object streams (/ObjStm) and
+native cross-reference streams (/XRef), reducing final PDF size without any
+external post-processing tool.
+
 It is designed for environments where installing dependencies is impossible,
 unwanted, or where the network is down.
 
 ==============================================================================
-2. WHAT IS NEW IN V1.8.0?
+2. WHAT IS NEW IN V1.9.0?
 ==============================================================================
 
-Version 1.8.0 adds zlib stream compression via libdeflate, external URL
-support, and multi-architecture builds.
+Version 1.9.0 adds native PDF 1.5 object streams and native cross-reference
+streams.
 
 Main changes:
 
-- Added zlib stream compression using libdeflate (/Filter /FlateDecode).
-- Compression is enabled by default at level 12 (libdeflate range: 1-12).
-- Added --level N to choose the compression level.
-- Added --no-compress to generate uncompressed PDFs as in v1.7.2.
-- --compress is still accepted for scripting (it is already the default).
+- Native PDF 1.5 output by default.
+- Native object streams (/ObjStm) for structural non-stream PDF objects.
+- Native cross-reference streams (/XRef) with binary /W [1 4 2] entries.
+- Object streams and xref streams are compressed with libdeflate when useful.
+- Added --pdf15, --pdf14, --object-streams=generate,
+  --object-streams=disable, --objstm and --no-object-streams.
+- Default behavior:
+
+    PDF 1.5 + object streams + no linearization.
+
+- Linearization is intentionally not generated. Linearization optimizes
+  Fast Web View, not minimum file size.
+- Classic PDF 1.4 output remains available with --pdf14.
+- Generated PDF 1.5 output passes qpdf --check.
+- Internal TOC links are rendered as plain blue text without
+  underline; link annotations use an invisible border and
+  codepoint-exact clickable rectangles.
+- Codepoint-aware Courier metrics: UTF-8 accents count as one
+  character, so link rectangles end exactly at the last printed
+  letter (trailing spaces, tabs and dots are trimmed).
+- Parser: glued indexes ("1.what is txt2pdf?") and mixed-case
+  section titles are accepted natively.
+- New --debug diagnostics: unparsable TOC lines, TOC entries without
+  a matching section, and section headers without a TOC link
+  (useful when the Bookmarks and Internal links counts differ).
+
+Example PDF 1.5 impact (Spanish manual from Baresnap):
+
+- txt2pdf v1.8 PDF 1.4:              373965 bytes
+- qpdf --object-streams=generate:     291972 bytes
+- txt2pdf v1.9 native PDF 1.5:        289417 bytes
+
+In this test, native txt2pdf v1.9 output is slightly smaller than the same
+document post-processed with qpdf, while remaining fully self-contained.
+
+All v1.8.0 features remain unchanged:
+
+- zlib stream compression using libdeflate (/Filter /FlateDecode).
+- Compression enabled by default at level 12.
+- --level N to choose the compression level.
+- --no-compress to generate uncompressed PDFs.
 - Compressed streams: page content streams, ToUnicode CMap and FontFile2.
-- Each stream is checked: it is only compressed when the result is smaller.
-- Images (JPEG/PNG) are never recompressed: they already carry their own
-  DCTDecode or FlateDecode data.
-- Added external URL support: http://, https://, ftp:// and www. links
-  found in the text become clickable /URI link annotations, rendered in
-  blue with underline.
-- Added --version / -V and a cleaner --help / -h.
-- Unknown options now produce an error instead of being ignored.
-- Multi-architecture build script: compiles for amd64, arm64, and riscv64.
-- Auto-downloads musl.cc toolchains if missing (no manual setup needed).
+- Images (JPEG/PNG) are never recompressed.
+- External URL support: http://, https://, ftp:// and www. links.
+- URLs become clickable /URI link annotations, rendered in blue with
+  underline.
+- --version / -V and --help / -h.
+- Unknown options produce an error instead of being ignored.
+- Multi-architecture build script: amd64, arm64, riscv64.
 - Deterministic builds with SOURCE_DATE_EPOCH and ZERO_AR_DATE.
-- Smaller binary: -Os plus garbage-collected sections (~90-110 KB).
-- Each binary reports its platform (amd64 / arm64 / riscv64).
-- A compression summary line is printed after each conversion.
+- Compression summary printed after each conversion.
 
-Example compression impact (180-page technical manual):
-
-- Uncompressed text streams: 824314 bytes
-- Compressed, level 12:      261247 bytes
-- Saved:                     68.3 percent
-
-All v1.7.2 features remain unchanged:
+All v1.7.2 features also remain unchanged:
 
 - CJK mode with --font FILE.ttf.
 - TrueType subsetting.
@@ -135,19 +180,19 @@ All v1.7.2 features remain unchanged:
 3. FONTS AND TYPOGRAPHY
 ==============================================================================
 
-txt2pdf v1.8.0 supports two font pipelines.
+txt2pdf v1.9.0 supports two font pipelines.
 
 A. Base14 fonts (classic mode):
 
---mono     Courier (default, classic txt2pdf layout)
---sans     Helvetica (clean, modern, proportional)
---serif    Times-Roman (classic documentation look)
+    --mono     Courier (default, classic txt2pdf layout)
+    --sans     Helvetica (clean, modern, proportional)
+    --serif    Times-Roman (classic documentation look)
 
 Examples:
 
-./txt2pdf --mono input.txt output.pdf
-./txt2pdf --sans input.txt output.pdf
-./txt2pdf --serif input.txt output.pdf
+    ./txt2pdf --mono input.txt output.pdf
+    ./txt2pdf --sans input.txt output.pdf
+    ./txt2pdf --serif input.txt output.pdf
 
 Important notes:
 
@@ -159,13 +204,13 @@ Important notes:
 
 B. Embedded TrueType font (CJK mode):
 
---font FILE.ttf
+    --font FILE.ttf
 
 Examples:
 
-./txt2pdf --font NotoSansJP-Regular.ttf roadmap.txt roadmap.pdf
-./txt2pdf --font NotoSansSC-Regular.ttf input.txt output.pdf
-./txt2pdf --font NotoSansKR-Regular.ttf input.txt output.pdf
+    ./txt2pdf --font NotoSansJP-Regular.ttf roadmap.txt roadmap.pdf
+    ./txt2pdf --font NotoSansSC-Regular.ttf input.txt output.pdf
+    ./txt2pdf --font NotoSansKR-Regular.ttf input.txt output.pdf
 
 Important notes:
 
@@ -181,7 +226,7 @@ Important notes:
 4. STREAM COMPRESSION (LIBDEFLATE)
 ==============================================================================
 
-txt2pdf v1.8.0 compresses PDF streams with zlib using the libdeflate
+txt2pdf v1.9.0 compresses PDF streams with zlib using the libdeflate
 library, which is compiled directly into the static binary.
 
 What gets compressed:
@@ -189,6 +234,8 @@ What gets compressed:
 - Page content streams (the actual text drawing operators).
 - The ToUnicode CMap stream (CJK mode).
 - The FontFile2 stream (embedded TrueType subset, CJK mode).
+- When PDF 1.5 object streams are enabled, the object stream itself and the
+  cross-reference stream are also compressed with libdeflate when useful.
 
 What is never recompressed:
 
@@ -197,16 +244,16 @@ What is never recompressed:
 
 Options:
 
-(default)        Compression ON, zlib level 12.
---level N        Compression ON, level N (1 = fastest, 12 = smallest).
---compress       Explicit ON. Accepted for scripting; it is the default.
---no-compress    Compression OFF, classic v1.7.2 output.
+    (default)        Compression ON, zlib level 12.
+    --level N        Compression ON, level N (1 = fastest, 12 = smallest).
+    --compress       Explicit ON. Accepted for scripting; it is the default.
+    --no-compress    Compression OFF, classic v1.7.2 stream behavior.
 
 Examples:
 
-./txt2pdf input.txt output.pdf
-./txt2pdf --level 6 input.txt output.pdf
-./txt2pdf --no-compress input.txt output.pdf
+    ./txt2pdf input.txt output.pdf
+    ./txt2pdf --level 6 input.txt output.pdf
+    ./txt2pdf --no-compress input.txt output.pdf
 
 Behavior notes:
 
@@ -218,8 +265,8 @@ Behavior notes:
   try --level 6 for a good speed/size balance.
 - At the end of each run a summary line is printed, for example:
 
-  Compression: zlib level 12 (libdeflate) | streams 824314 ->
-  261247 bytes (68.3% saved)
+    Compression: zlib level 12 (libdeflate) | streams 824314 ->
+    261247 bytes (68.3% saved)
 
 ==============================================================================
 5. URL LINKS
@@ -240,9 +287,13 @@ stripped from the link.
 
 Example:
 
-http://example.com and www.example.org are working too.
+    http://example.com and www.example.org are working too.
 
-All three URLs become clickable blue underlined links.
+All detected URLs become clickable blue underlined links.
+
+Internal TOC links follow a different visual style: they are rendered
+in blue WITHOUT underline, keeping the index clean. External URLs
+keep the classic blue underline.
 
 Limitations:
 
@@ -259,19 +310,19 @@ txt2pdf supports standalone block images.
 
 Supported image tags:
 
-[IMG]photo.jpg[/IMG]
-[IMG]diagram.jpeg[/IMG]
-[IMG]chart.png[/IMG]
+    [IMG]photo.jpg[/IMG]
+    [IMG]diagram.jpeg[/IMG]
+    [IMG]chart.png[/IMG]
 
 The image line must be the only content on that line.
 
 Good image line:
 
-[IMG]chart.png[/IMG]
+    [IMG]chart.png[/IMG]
 
 Bad image line:
 
-See this chart: [IMG]chart.png[/IMG]
+    See this chart: [IMG]chart.png[/IMG]
 
 Supported formats:
 
@@ -312,26 +363,26 @@ headers.
 A line is considered a section header only if all of these conditions are
 true:
 
-- It starts with a digit, optionally followed by letters, then a dot.
-- The title text after the dot contains only uppercase letters.
+- It starts with a digit, optionally followed by letters and dots
+  (hierarchical IDs such as 2.3, 11.14, 13.1b).
+- The title text after the dot contains at least one alphabetic
+  character, in any case ("1. WHAT", "1. What" and "1. what" work).
+- The space after the numeric dot is optional: "1.what" is valid.
 - The line is surrounded by separator lines made mostly of '=' characters.
 - The line is not inside a contents block.
 
 Valid section shape:
-
 - separator line
-- uppercase numbered title
+- numbered title (any case)
 - separator line
 
 Rejected lines:
-
-- numbered titles containing lowercase letters
+- numbered titles without any alphabetic character
 - numbered titles used as examples inside normal paragraphs
 - numbered titles not surrounded by separator lines
 - numbered titles inside the contents block
 
 This makes the parser much safer for manuals that contain examples.
-
 The parser supports hierarchical IDs such as:
 
 - 1
@@ -356,7 +407,7 @@ A contents block is detected when:
 
 Rules for entries:
 
-- entries must be numbered lines
+- entries must be numbered lines (the space after the dot is optional)
 - lowercase entries are recommended
 - entries are not converted into bookmarks
 - entries are linked to the matching section by number or title
@@ -371,36 +422,46 @@ parser itself.
 
 Basic usage:
 
-./txt2pdf input.txt output.pdf
+    ./txt2pdf input.txt output.pdf
 
 Font selection:
 
-./txt2pdf --mono input.txt output.pdf
-./txt2pdf --sans input.txt output.pdf
-./txt2pdf --serif input.txt output.pdf
-./txt2pdf --font FILE.ttf input.txt output.pdf
+    ./txt2pdf --mono input.txt output.pdf
+    ./txt2pdf --sans input.txt output.pdf
+    ./txt2pdf --serif input.txt output.pdf
+    ./txt2pdf --font FILE.ttf input.txt output.pdf
 
 Compression control:
 
-./txt2pdf input.txt output.pdf
-./txt2pdf --level 6 input.txt output.pdf
-./txt2pdf --compress input.txt output.pdf
-./txt2pdf --no-compress input.txt output.pdf
+    ./txt2pdf input.txt output.pdf
+    ./txt2pdf --level 6 input.txt output.pdf
+    ./txt2pdf --compress input.txt output.pdf
+    ./txt2pdf --no-compress input.txt output.pdf
+
+PDF version / object streams:
+
+    ./txt2pdf input.txt output.pdf
+    ./txt2pdf --pdf15 input.txt output.pdf
+    ./txt2pdf --pdf14 input.txt output.pdf
+    ./txt2pdf --object-streams=generate input.txt output.pdf
+    ./txt2pdf --object-streams=disable input.txt output.pdf
+    ./txt2pdf --objstm input.txt output.pdf
+    ./txt2pdf --no-object-streams input.txt output.pdf
 
 Information:
 
-./txt2pdf --help
-./txt2pdf --version
+    ./txt2pdf --help
+    ./txt2pdf --version
 
 Debug usage:
 
-./txt2pdf --debug input.txt output.pdf
+    ./txt2pdf --debug input.txt output.pdf
 
 Combined usage:
 
-./txt2pdf --debug --sans input.txt output.pdf
-./txt2pdf --debug --level 9 input.txt output.pdf
-./txt2pdf --debug --font NotoSansJP-Regular.ttf input.txt output.pdf
+    ./txt2pdf --debug --sans input.txt output.pdf
+    ./txt2pdf --debug --level 9 input.txt output.pdf
+    ./txt2pdf --debug --font NotoSansJP-Regular.ttf input.txt output.pdf
 
 Debug mode prints diagnostics to stderr.
 
@@ -409,16 +470,21 @@ It reports:
 - detected encoding
 - selected font
 - compression mode and level
+- PDF version and object-stream mode
 - lines marked as part of a contents block
 - detected section headers
 - skipped uppercase numbered lines
 - detected internal links
+- TOC lines that cannot be parsed as numbered entries
+- TOC entries without a matching section
+- section headers without any TOC link pointing to them
 - detected images
 - image placements
 - CJK glyph count and subset size (in CJK mode)
 
 Use debug mode when:
 
+- the Bookmarks and Internal links counts do not match
 - a bookmark is missing
 - too many bookmarks appear
 - a contents entry does not link anywhere
@@ -456,7 +522,8 @@ become real bookmarks.
 11. PDF INTERNALS
 ==============================================================================
 
-txt2pdf generates a valid PDF 1.4 structure from scratch.
+txt2pdf generates a valid PDF 1.5 structure by default. Legacy PDF 1.4
+output can be forced with --pdf14.
 
 Catalog and Pages:
 
@@ -479,6 +546,13 @@ zlib format and declared with /Filter /FlateDecode. The /Length entry
 always reflects the stored compressed size. Streams that would grow when
 compressed are stored uncompressed instead. Image streams are never
 recompressed.
+
+Object Streams:
+
+When object streams are enabled, structural non-stream objects are grouped
+into a PDF /ObjStm object and compressed with libdeflate. Stream objects
+such as page content streams, image XObjects, FontFile2 and ToUnicode CMap
+remain separate objects, as required by the PDF specification.
 
 Images:
 
@@ -511,11 +585,16 @@ Annotations:
 Scans contents blocks and injects link annotations for each entry matching
 a real section. URL links are injected as /URI annotations.
 
-Cross-Reference Table:
+Cross-Reference:
 
-Calculates byte offsets for every object and writes a compliant xref table
-and trailer. Offsets are computed after compression, so they always point
-to the exact start of each object.
+In PDF 1.5 object-stream mode, txt2pdf writes a binary /XRef stream using
+/W [1 4 2]. Entries can reference normal objects by file offset, or objects
+stored inside an object stream by object-stream number and index.
+
+In PDF 1.4 mode, txt2pdf writes the classic xref table and trailer.
+
+Offsets are computed after compression, so they always point to the exact
+start of each object.
 
 ==============================================================================
 12. PROJECT STRUCTURE
@@ -546,6 +625,7 @@ The main C file contains:
 - URL detection
 - page break calculation
 - PDF object generation
+- PDF 1.5 object-stream generation
 - binary stream writing
 
 The tool is intentionally small and auditable.
@@ -556,7 +636,7 @@ The tool is intentionally small and auditable.
 
 Provided build script:
 
-./compile.sh
+    ./compile.sh
 
 What compile.sh does:
 
@@ -572,28 +652,29 @@ What compile.sh does:
 
 Build flags used to keep the binary small:
 
--Os -ffunction-sections -fdata-sections
--fno-unwind-tables -fno-asynchronous-unwind-tables
--static -Wl,--gc-sections -Wl,--build-id=none -s
+    -Os -ffunction-sections -fdata-sections
+    -fno-unwind-tables -fno-asynchronous-unwind-tables
+    -static -Wl,--gc-sections -Wl,--build-id=none -s
 
 Expected result:
 
-wc -c txt2pdf
+    wc -c txt2pdf
+
 around 90-110 KB, static and stripped (architecture dependent)
 
 Multi-architecture builds:
 
-./compile.sh              (build for host architecture)
-./compile.sh amd64        (build for x86_64)
-./compile.sh arm64        (build for aarch64)
-./compile.sh riscv64      (build for RISC-V 64-bit)
-./compile.sh all          (build all three at once)
+    ./compile.sh              (build for host architecture)
+    ./compile.sh amd64        (build for x86_64)
+    ./compile.sh arm64        (build for aarch64)
+    ./compile.sh riscv64      (build for RISC-V 64-bit)
+    ./compile.sh all          (build all three at once)
 
 Manual build (once libdeflate/libdeflate.a exists):
 
-musl-gcc -Os -Wall -Wextra -std=c11 -static -Ilibdeflate \
-    -o txt2pdf txt2pdf.c libdeflate/libdeflate.a
-strip txt2pdf
+    musl-gcc -Os -Wall -Wextra -std=c11 -static -Ilibdeflate \
+        -o txt2pdf txt2pdf.c libdeflate/libdeflate.a
+    strip txt2pdf
 
 Why musl?
 
@@ -603,8 +684,8 @@ self-contained executable.
 
 Verify static build:
 
-file txt2pdf
-ldd txt2pdf
+    file txt2pdf
+    ldd txt2pdf
 
 Expected:
 
@@ -613,12 +694,12 @@ Expected:
 
 Optional extra squeeze (if UPX is installed):
 
-upx --best --lzma txt2pdf
+    upx --best --lzma txt2pdf
 
 Force a libdeflate rebuild:
 
-rm -rf libdeflate/build libdeflate/libdeflate.a
-./compile.sh
+    rm -rf libdeflate/build libdeflate/libdeflate.a
+    ./compile.sh
 
 ==============================================================================
 14. KNOWN LIMITATIONS
@@ -626,6 +707,8 @@ rm -rf libdeflate/build libdeflate/libdeflate.a
 
 General:
 
+- Object streams require PDF 1.5; use --pdf14 for legacy viewers.
+- No linearization (Fast Web View) is generated.
 - No custom page sizes.
 - No custom margins.
 - No multi-column layout.
@@ -664,6 +747,8 @@ Compression:
 
 - Only text-bearing streams are compressed (content, ToUnicode, FontFile2).
 - Image streams are never recompressed.
+- Object streams and xref streams are only used in PDF 1.5 object-stream
+  mode.
 - Level 12 is the slowest level; huge documents may prefer --level 6.
 - libdeflate sources must be present in libdeflate/ at build time.
 
@@ -675,6 +760,13 @@ Parser:
 ==============================================================================
 15. TROUBLESHOOTING
 ==============================================================================
+
+Bookmarks and Internal links counts differ:
+
+- A section header has no entry in the contents block (or vice versa).
+- The entry number or title does not match the header exactly.
+- Run with --debug: it prints the orphan TOC entries and the section
+  headers without a TOC link.
 
 Missing bookmarks:
 
@@ -778,9 +870,10 @@ txt2pdf is a rejection of that bloat.
 It proves that a fully functional, structured document generator can fit
 in a tiny static binary, written in pure C11.
 
-Version 1.8.0 bends the zero-dependency rule exactly once: the libdeflate
-compressor is compiled directly into the binary. No shared libraries, no
-runtime loading, no configuration files. One file, no excuses.
+Version 1.9.0 keeps the zero-dependency rule: the libdeflate compressor is
+compiled directly into the binary, and PDF 1.5 object streams are generated
+natively. No external qpdf, no shared libraries, no runtime loading, no
+configuration files. One file, no excuses.
 
 When the cloud goes down, and the package managers fail to resolve,
 the Spartan tool remains.
@@ -792,8 +885,8 @@ the Spartan tool remains.
 ==============================================================================
 
 Source code : GPLv3
-Manual: GFDL v1.3
-libdeflate: MIT license, Copyright 2016 Eric Biggers
+Manual      : GFDL v1.3
+libdeflate  : MIT license, Copyright 2016 Eric Biggers
 
 txt2pdf was written as a demonstration of minimalist software design.
 

@@ -1,5 +1,5 @@
 ==============================================================================
-TXT2PDF V1.8.0 - THE SPARTAN PDF GENERATOR -LICENSE-
+TXT2PDF V1.9.0 - THE SPARTAN PDF GENERATOR -LICENSE-
 ==============================================================================
 SOURCE CODE (src/): Under the GNU General Public Licence v3.0 (GPLv3).
 TEXTS (docs/): Under the GFDL v1.3
@@ -746,4 +746,3 @@ including containerization or autonomous deployment pipelines—must retain this
 notice unaltered, binding all downstream users to recognize the substantial 
 human input driving this codebase.
 ===============================================================================
-
