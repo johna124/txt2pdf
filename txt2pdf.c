@@ -1,112 +1,130 @@
-/*
- * txt2pdf THE SPARTAN PDF GENERATOR
- * Copyright (C) 2026  John (johna124)
- *
- * This program is free software: you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation, either version 3 of the License, or
- * (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program.  If not, see <https://www.gnu.org/licenses/>.
- *
- * Source, issues, contact: https://github.com/johna124
- *
- *
- * txt2pdf.c v1.7.2
- *
- * Simple TXT to PDF converter in pure C, without external libraries.
- *
- * Features:
- * - Generates PDF 1.4 directly.
- * - Base14 fonts: Courier (default), Helvetica and Times-Roman.
- * - Auto-detection of UTF-8 vs Latin-1/ISO-8859-1 input.
- * - PDF bookmarks (outline) for numbered sections.
- * - Internal links in the TOC.
- * - Block images: [IMG]file.jpg[/IMG] and [IMG]file.png[/IMG].
- * - JPEG embedded via native /DCTDecode passthrough.
- * - Simple PNG embedded via /FlateDecode with PNG predictor.
- * - Proportional wrapping using built-in ASCII metrics.
- * - OPTIONAL CJK MODE: embedded Unicode TrueType fonts via --font FILE.ttf.
- * - CJK font subsetting: only used glyphs are embedded.
- *
- * Changes v1.7.2:
- * - Added --font FILE.ttf to enable Unicode CJK output.
- *   In this mode the selected TrueType font is used for ALL text,
- *   including ASCII and Latin accents. --sans/--serif/--mono are
- *   superseded by --font.
- * - Added a minimal TrueType reader: head, hhea, maxp, cmap (formats
- *   4 and 12), hmtx, glyf, loca, OS/2, post and name.
- * - Added PDF Unicode font pipeline:
- *     /Type0 + /Encoding /Identity-H
- *     /CIDFontType2 + /CIDToGIDMap /Identity
- *     /FontFile2 (embedded TrueType subset)
- *     /W (real glyph advances)
- *     /ToUnicode (copy, paste and search support)
- * - Added real TTF subsetting: only the glyphs used by the document
- *   are embedded, including dependencies of compound glyphs.
- *   Example: a document with a few Japanese glyphs in its titles
- *   drops from ~5 MB (full Noto Sans JP) to ~75 KB.
- * - Added codepoint-aware CJK layout: line breaking between CJK
- *   characters and accurate link rectangles using TTF advances.
- * - Added UTF-16BE outline titles so bookmarks containing Japanese,
- *   Chinese or Korean text display correctly.
- * - Added UTF-8 codepoint decoding for 4-byte sequences.
- * - Keeps the existing Base14 path unchanged when --font is not used.
- *
- *   Limitations of v1.7.2:
- *   - Requires an individual TrueType .ttf file. OpenType/CFF .otf
- *     and TrueType collections .ttc are not supported yet.
- *   - No automatic font fallback per script; choose a font with the
- *     required glyph coverage (e.g. Noto Sans JP / SC / TC / KR).
- *   - CJK only: Arabic, Indic and other scripts requiring shaping
- *     are not implemented.
- *   - Subsetting is uncompressed; further size optimizations are
- *     possible in future versions.
- *
- * Changes v1.7.1:
- * - Improved WinAnsi character detection.
- *
- * Changes v1.7:
- * - Added --sans, --serif and --mono options for Base14 fonts.
- * - Added [IMG]file.jpg[/IMG] and [IMG]file.png[/IMG] block images.
- * - JPEG images are embedded with native /DCTDecode passthrough.
- * - Simple PNG images are embedded with /FlateDecode PNG predictor.
- * - Proportional fonts use built-in ASCII metrics for wrapping.
- *
- * Changes v1.6:
- * - CRITICAL FIX: parse_section_line_dyn() now captures complete
- *   hierarchical IDs (2.3, 11.14, 13.1b, 26.5a, 2.0a, etc.).
- *   Previously only captured the first number ("2" for "2.3 ..."),
- *   which caused all TOC links of subsections to point to the
- *   main section.
- * - Support for subsections of any depth (2.3.1, 2.3.1.2).
- * - Support for alphanumeric suffixes (2.0a, 13.1b, 26.5a).
- * - Correct handling of "2. Title" (loose dot without subsection).
- *
- * Changes v1.5:
- * - Auto-detection of UTF-8 vs Latin-1/ISO-8859-1 encoding.
- * - Smart decoder in pdf_escape to translate UTF-8 to WinAnsiEncoding.
- * - Full support for accents, ñ and umlauts.
- *
- * Compile:
- *   gcc -O2 -Wall -Wextra -std=c11 -o txt2pdf txt2pdf.c
- *
- * Usage:
- *   ./txt2pdf [--debug] [--sans|--serif|--mono] input.txt output.pdf
- *   ./txt2pdf [--debug] --font FILE.ttf input.txt output.pdf
- *
- * Examples:
- *   ./txt2pdf readme.txt readme.pdf
- *   ./txt2pdf --debug --sans readme.txt readme.pdf
- *   ./txt2pdf --font NotoSansJP-Regular.ttf roadmap.txt roadmap.pdf
- *   ./txt2pdf --font NotoSansSC-Regular.ttf doc_chino.txt doc_chinese.pdf
- */
+/*txt2pdf THE SPARTAN PDF GENERATOR
+Copyright (C) 2026  John (johna124)
+
+This program is free software: you can redistribute it and/or modify
+it under the terms of the GNU General Public License as published by
+the Free Software Foundation, either version 3 of the License, or
+(at your option) any later version.
+
+This program is distributed in the hope that it will be useful,
+but WITHOUT ANY WARRANTY; without even the implied warranty of
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+GNU General Public License for more details.
+You should have received a copy of the GNU General Public License
+along with this program.  If not, see https://www.gnu.org/licenses/.
+Source, issues, contact: https://github.com/johna124
+
+SUBJECT TO GPLv3 SECTION 7(b) TERMS
+FULL INTELLECTUAL AUTHORSHIP AND SYSTEM ARCHITECTURE RESIDE WITH THE HUMAN.
+ANY FORK OR DERIVATIVE WORK MUST RETAIN THE MANIFESTO IN THE LICENSE FILE.
+
+txt2pdf.c v1.8.0
+Simple TXT to PDF converter in pure C, with optional libdeflate
+compression for the PDF streams.
+
+Features:
+Generates PDF 1.4 directly.
+Base14 fonts: Courier (default), Helvetica and Times-Roman.
+Auto-detection of UTF-8 vs Latin-1/ISO-8859-1 input.
+PDF bookmarks (outline) for numbered sections.
+Internal links in the TOC.
+Block images: [IMG]file.jpg[/IMG] and [IMG]file.png[/IMG].
+JPEG embedded via native /DCTDecode passthrough.
+Simple PNG embedded via /FlateDecode with PNG predictor.
+Proportional wrapping using built-in ASCII metrics.
+OPTIONAL CJK MODE: embedded Unicode TrueType fonts via --font FILE.ttf.
+CJK font subsetting: only used glyphs are embedded.
+Optional zlib stream compression via libdeflate (--compress).
+
+Changes v1.8.0:
+Added --compress to compress PDF streams (page content, ToUnicode
+CMap and FontFile2) with zlib via libdeflate (/FlateDecode).
+Added --level N (1-12, implies --compress). Default level: 12.
+Streams are only compressed when it actually saves bytes.
+Already-compressed image streams (DCT/Flate) are left untouched.
+Added --version / -V and a cleaner --help / -h.
+Unknown options now produce an error instead of being ignored.
+compile.sh builds libdeflate statically with musl-gcc.
+
+Compression is now enabled by default (level 12). --no-compress
+disables it. 
+Smaller binary (function/data sections + gc-sections).
+
+Added external URL support: http://, https://, ftp:// and www.
+links found in the text become clickable /URI link annotations.
+
+Limitations of v1.8.0:
+Requires an individual TrueType .ttf file. OpenType/CFF .otf
+and TrueType collections .ttc are not supported yet.
+No automatic font fallback per script; choose a font with the
+required glyph coverage (e.g. Noto Sans JP / SC / TC / KR).
+CJK only: Arabic, Indic and other scripts requiring shaping
+are not implemented.
+
+Changes v1.7.2:
+Added --font FILE.ttf to enable Unicode CJK output.
+In this mode the selected TrueType font is used for ALL text,
+including ASCII and Latin accents. --sans/--serif/--mono are
+superseded by --font.
+Added a minimal TrueType reader: head, hhea, maxp, cmap (formats
+4 and 12), hmtx, glyf, loca, OS/2, post and name.
+Added PDF Unicode font pipeline:
+/Type0 + /Encoding /Identity-H
+/CIDFontType2 + /CIDToGIDMap /Identity
+/FontFile2 (embedded TrueType subset)
+/W (real glyph advances)
+/ToUnicode (copy, paste and search support)
+Added real TTF subsetting: only the glyphs used by the document
+are embedded, including dependencies of compound glyphs.
+
+
+Example: a document with a few Japanese glyphs in its titles
+drops from ~5 MB (full Noto Sans JP) to ~75 KB.
+Added codepoint-aware CJK layout: line breaking between CJK
+characters and accurate link rectangles using TTF advances.
+Added UTF-16BE outline titles so bookmarks containing Japanese,
+Chinese or Korean text display correctly.
+Added UTF-8 codepoint decoding for 4-byte sequences.
+Keeps the existing Base14 path unchanged when --font is not used.
+
+
+Changes v1.7.1:
+Improved WinAnsi character detection.
+Changes v1.7:
+Added --sans, --serif and --mono options for Base14 fonts.
+Added [IMG]file.jpg[/IMG] and [IMG]file.png[/IMG] block images.
+JPEG images are embedded with native /DCTDecode passthrough.
+Simple PNG images are embedded with /FlateDecode PNG predictor.
+Proportional fonts use built-in ASCII metrics for wrapping.
+
+Changes v1.6:
+CRITICAL FIX: parse_section_line_dyn() now captures complete
+hierarchical IDs (2.3, 11.14, 13.1b, 26.5a, 2.0a, etc.).
+Previously only captured the first number ("2" for "2.3 ..."),
+which caused all TOC links of subsections to point to the
+main section.
+Support for subsections of any depth (2.3.1, 2.3.1.2).
+Support for alphanumeric suffixes (2.0a, 13.1b, 26.5a).
+Correct handling of "2. Title" (loose dot without subsection).
+
+Changes v1.5:
+Auto-detection of UTF-8 vs Latin-1/ISO-8859-1 encoding.
+Smart decoder in pdf_escape to translate UTF-8 to WinAnsiEncoding.
+Full support for accents, ñ and umlauts.
+
+Compile:
+./compile.sh            (builds libdeflate + txt2pdf, static)
+
+Usage:
+./txt2pdf [options] input.txt output.pdf
+
+Examples:
+./txt2pdf readme.txt readme.pdf
+./txt2pdf --compress --level 12 readme.txt readme.pdf
+./txt2pdf --debug --sans readme.txt readme.pdf
+./txt2pdf --font NotoSansJP-Regular.ttf roadmap.txt roadmap.pdf
+./txt2pdf --font NotoSansSC-Regular.ttf doc_chino.txt doc_chinese.pdf
+*/
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -116,6 +134,29 @@
 #include <locale.h>
 #include <stdint.h>
 #include <unistd.h>
+#include <libdeflate.h>
+
+#define TXT2PDF_VERSION "1.8.0"
+
+/* ========================================================================
+   Platform detection (compile-time)
+   ======================================================================== */
+
+#if defined(__x86_64__) || defined(_M_X64)
+    #define TXT2PDF_PLATFORM "amd64"
+#elif defined(__aarch64__) || defined(_M_ARM64)
+    #define TXT2PDF_PLATFORM "arm64"
+#elif defined(__riscv) && (__riscv_xlen == 64)
+    #define TXT2PDF_PLATFORM "riscv64"
+#elif defined(__i386__) || defined(_M_IX86)
+    #define TXT2PDF_PLATFORM "i386"
+#elif defined(__arm__)
+    #define TXT2PDF_PLATFORM "arm32"
+#elif defined(__riscv) && (__riscv_xlen == 32)
+    #define TXT2PDF_PLATFORM "riscv32"
+#else
+    #define TXT2PDF_PLATFORM "unknown"
+#endif
 
 #define PAGE_WIDTH   595.0
 #define PAGE_HEIGHT  842.0
@@ -127,16 +168,12 @@
 /* ========================================================================
 UTF-8 detection
 ======================================================================== */
-
 static int g_is_utf8 = 0;
-
 static int detect_if_utf8(const char *data, size_t len)
 {
     int has_multibyte = 0;
-
     for (size_t i = 0; i < len; ) {
         unsigned char c = (unsigned char)data[i];
-
         if (c < 0x80) {
             i++;
         } else if ((c & 0xE0) == 0xC0) {
@@ -163,20 +200,17 @@ static int detect_if_utf8(const char *data, size_t len)
             return 0;
         }
     }
-
     return has_multibyte;
 }
 
 /* ========================================================================
 Memory / string utilities
 ======================================================================== */
-
 typedef struct {
     char   *data;
     size_t  len;
     size_t  cap;
 } Str;
-
 static void *xmalloc(size_t n)
 {
     void *p = malloc(n);
@@ -186,7 +220,6 @@ static void *xmalloc(size_t n)
     }
     return p;
 }
-
 static void *xrealloc(void *p, size_t n)
 {
     void *q = realloc(p, n);
@@ -196,7 +229,6 @@ static void *xrealloc(void *p, size_t n)
     }
     return q;
 }
-
 static char *xstrdup(const char *s)
 {
     size_t n = strlen(s) + 1;
@@ -204,7 +236,6 @@ static char *xstrdup(const char *s)
     memcpy(p, s, n);
     return p;
 }
-
 static char *xstrndup(const char *s, size_t n)
 {
     char *p = xmalloc(n + 1);
@@ -213,12 +244,10 @@ static char *xstrndup(const char *s, size_t n)
     p[n] = '\0';
     return p;
 }
-
 static void str_reserve(Str *s, size_t need)
 {
     if (need == 0)
         need = 1;
-
     if (s->cap < need) {
         size_t ncap = s->cap ? s->cap : 64;
         while (ncap < need)
@@ -226,11 +255,9 @@ static void str_reserve(Str *s, size_t need)
         s->data = xrealloc(s->data, ncap);
         s->cap = ncap;
     }
-
     if (s->data && s->len < s->cap)
         s->data[s->len] = '\0';
 }
-
 static void str_init(Str *s)
 {
     s->data = NULL;
@@ -240,7 +267,6 @@ static void str_init(Str *s)
     s->len = 0;
     s->data[0] = '\0';
 }
-
 static void str_free(Str *s)
 {
     free(s->data);
@@ -248,7 +274,6 @@ static void str_free(Str *s)
     s->len = 0;
     s->cap = 0;
 }
-
 static void str_append(Str *s, const char *data, size_t len)
 {
     str_reserve(s, s->len + len + 1);
@@ -256,38 +281,82 @@ static void str_append(Str *s, const char *data, size_t len)
     s->len += len;
     s->data[s->len] = '\0';
 }
-
 static void str_append_str(Str *s, const char *str)
 {
     str_append(s, str, strlen(str));
 }
-
 static void str_append_char(Str *s, char c)
 {
     str_reserve(s, s->len + 2);
     s->data[s->len++] = c;
     s->data[s->len] = '\0';
 }
-
 static void str_appendf(Str *s, const char *fmt, ...)
 {
     va_list ap, ap2;
     va_start(ap, fmt);
     va_copy(ap2, ap);
-
     int n = vsnprintf(NULL, 0, fmt, ap);
     va_end(ap);
-
     if (n < 0) {
         va_end(ap2);
         return;
     }
-
     str_reserve(s, s->len + (size_t)n + 1);
     vsnprintf(s->data + s->len, (size_t)n + 1, fmt, ap2);
     s->len += (size_t)n;
-
     va_end(ap2);
+}
+
+/* ========================================================================
+Flate compression (libdeflate) -- activated with --compress
+======================================================================== */
+static int g_compress = 1;                 /* enabled by --compress / --level */
+static int g_level = 12;                   /* libdeflate supports 1..12 */
+static struct libdeflate_compressor *g_compressor = NULL;
+static size_t g_stat_raw = 0;
+static size_t g_stat_out = 0;
+
+/*
+ * Writes a PDF object with a stream. If compression is enabled and it
+ * actually saves bytes, the stream is written zlib-compressed with
+ * /Filter /FlateDecode. `dict_extra` lets callers append extra keys
+ * (e.g. " /Length1 N" for FontFile2).
+ */
+
+static void write_pdf_stream_obj(FILE *out, long *offsets, int obj,
+                                 const char *dict_extra,
+                                 const void *data, size_t len)
+{
+    unsigned char *comp = NULL;
+    size_t comp_len = 0;
+    int use_flate = 0;
+
+    if (g_compress && g_compressor && len > 32) {
+        size_t bound = libdeflate_zlib_compress_bound(g_compressor, len);
+        comp = xmalloc(bound ? bound : 1);
+        comp_len = libdeflate_zlib_compress(g_compressor,
+                                            data, len, comp, bound);
+        if (comp_len > 0 && comp_len < len)
+            use_flate = 1;   
+    }
+
+    const void *out_data = use_flate ? (const void *)comp : data;
+    size_t out_len = use_flate ? comp_len : len;
+
+    offsets[obj] = ftell(out);
+    fprintf(out, "%d 0 obj\n<< /Length %zu%s%s >>\nstream\n",
+            obj, out_len,
+            use_flate ? " /Filter /FlateDecode" : "",
+            dict_extra ? dict_extra : "");
+    if (out_len > 0)
+        fwrite(out_data, 1, out_len, out);
+    fwrite("\nendstream\nendobj\n", 1, sizeof("\nendstream\nendobj\n") - 1, out);
+
+    g_stat_raw += len;
+    g_stat_out += out_len;
+
+    free(comp);
 }
 
 /* ========================================================================
@@ -301,7 +370,6 @@ static double visible_width(const char *s)
         n--;
     return (double)n * CHAR_WIDTH;
 }
-
 static void next_visual_chunk(const char *s,
                               size_t off,
                               size_t slen,
@@ -310,22 +378,18 @@ static void next_visual_chunk(const char *s,
                               size_t *out_consume)
 {
     size_t remaining = slen - off;
-
     if (remaining <= (size_t)max_chars) {
         *out_text = xstrndup(s + off, remaining);
         *out_consume = remaining;
         return;
     }
-
     int br = -1;
-
     for (int k = max_chars - 1; k >= 0; --k) {
         if (isspace((unsigned char)s[off + (size_t)k])) {
             br = k;
             break;
         }
     }
-
     if (br < 0) {
         for (int k = max_chars - 1; k >= 0; --k) {
             unsigned char c = (unsigned char)s[off + (size_t)k];
@@ -335,21 +399,18 @@ static void next_visual_chunk(const char *s,
             }
         }
     }
-
     if (br >= 0) {
         size_t len = (size_t)br + 1;
         *out_text = xstrndup(s + off, len);
         *out_consume = len;
         return;
     }
-
     if (off + (size_t)max_chars < slen &&
         isspace((unsigned char)s[off + (size_t)max_chars])) {
         *out_text = xstrndup(s + off, (size_t)max_chars);
         *out_consume = (size_t)max_chars;
         return;
     }
-
     if (max_chars > 1) {
         size_t len = (size_t)max_chars - 1;
         char *buf = xmalloc(len + 2);
@@ -363,45 +424,36 @@ static void next_visual_chunk(const char *s,
         *out_consume = 1;
     }
 }
-
 static char *read_file(const char *path, size_t *out_len)
 {
     FILE *f = fopen(path, "rb");
     if (!f)
         return NULL;
-
     if (fseek(f, 0, SEEK_END) != 0) {
         fclose(f);
         return NULL;
     }
-
     long sz = ftell(f);
     if (sz < 0) {
         fclose(f);
         return NULL;
     }
-
     if (fseek(f, 0, SEEK_SET) != 0) {
         fclose(f);
         return NULL;
     }
-
     char *buf = xmalloc((size_t)sz + 1);
     size_t rd = fread(buf, 1, (size_t)sz, f);
     buf[rd] = '\0';
     fclose(f);
-
     if (out_len)
         *out_len = rd;
-
     return buf;
 }
-
 static char **split_lines(const char *data, size_t len, int *out_n)
 {
     char **lines = NULL;
     size_t n = 0, cap = 0;
-
     if (len == 0) {
         lines = xmalloc(sizeof(char *));
         lines[0] = xstrdup("");
@@ -409,56 +461,42 @@ static char **split_lines(const char *data, size_t len, int *out_n)
     } else {
         const char *p = data;
         const char *end = data + len;
-
         while (p < end) {
             const char *start = p;
             while (p < end && *p != '\n')
                 p++;
-
             size_t l = (size_t)(p - start);
             if (l > 0 && start[l - 1] == '\r')
                 l--;
-
             char *line = xmalloc(l + 1);
             memcpy(line, start, l);
             line[l] = '\0';
-
             if (n == cap) {
                 cap = cap ? cap * 2 : 64;
                 lines = xrealloc(lines, cap * sizeof(char *));
             }
-
             lines[n++] = line;
-
             if (p < end && *p == '\n')
                 p++;
         }
     }
-
     *out_n = (int)n;
     return lines;
 }
-
 static char *trim_dup(const char *src)
 {
     const char *p = src;
-
     while (isspace((unsigned char)*p))
         p++;
-
     size_t len = strlen(p);
-
     while (len > 0 && isspace((unsigned char)p[len - 1]))
         len--;
-
     return xstrndup(p, len);
 }
-
 static int is_separator(const char *line)
 {
     int count = 0;
     const char *p = line;
-
     while (*p) {
         if (*p == '=')
             count++;
@@ -466,10 +504,8 @@ static int is_separator(const char *line)
             return 0;
         p++;
     }
-
     return count >= 10;
 }
-
 static int line_is_blank(const char *s)
 {
     while (*s) {
@@ -479,20 +515,16 @@ static int line_is_blank(const char *s)
     }
     return 1;
 }
-
 static int nearby_prev_is_separator(char **lines, int nlines, int i)
 {
     (void)nlines;
-
     for (int j = i - 1; j >= 0 && j >= i - 5; --j) {
         if (line_is_blank(lines[j]))
             continue;
         return is_separator(lines[j]);
     }
-
     return 0;
 }
-
 static int nearby_next_is_separator(char **lines, int nlines, int i)
 {
     for (int j = i + 1; j < nlines && j <= i + 5; ++j) {
@@ -500,89 +532,68 @@ static int nearby_next_is_separator(char **lines, int nlines, int i)
             continue;
         return is_separator(lines[j]);
     }
-
     return 0;
 }
-
 /* ========================================================================
 Section parser
 ======================================================================== */
-
 static int parse_section_line_dyn(const char *line,
                                   char **id_out,
                                   char **title_out)
 {
     const char *p = line;
-
     while (isspace((unsigned char)*p))
         p++;
-
     if (!isdigit((unsigned char)*p))
         return 0;
-
     Str id;
     str_init(&id);
-
     while (isdigit((unsigned char)*p)) {
         str_append_char(&id, *p);
         p++;
     }
-
     while (isalpha((unsigned char)*p)) {
         str_append_char(&id, (char)tolower((unsigned char)*p));
         p++;
     }
-
     while (*p == '.') {
         const char *save_p = p;
         p++;
-
         if (!isdigit((unsigned char)*p)) {
             p = save_p;
             break;
         }
-
         str_append_char(&id, '.');
-
         while (isdigit((unsigned char)*p)) {
             str_append_char(&id, *p);
             p++;
         }
-
         while (isalpha((unsigned char)*p)) {
             str_append_char(&id, (char)tolower((unsigned char)*p));
             p++;
         }
     }
-
     if (*p == '.')
         p++;
-
     if (*p != '\0' && !isspace((unsigned char)*p)) {
         str_free(&id);
         return 0;
     }
-
     while (isspace((unsigned char)*p))
         p++;
-
     char *title = trim_dup(p);
-
     if (id.len == 0) {
         str_free(&id);
         free(title);
         return 0;
     }
-
     *id_out = id.data;
     *title_out = title;
     return 1;
 }
-
 static int is_upper_title(const char *title)
 {
     int has = 0;
-
     for (const char *p = title; *p; ++p) {
         if (isalpha((unsigned char)*p)) {
             has = 1;
@@ -590,24 +601,19 @@ static int is_upper_title(const char *title)
                 return 0;
         }
     }
-
     return has;
 }
-
 static char *normalize_alnum_upper_dup(const char *s)
 {
     Str out;
     str_init(&out);
-
     for (const char *p = s; *p; ++p) {
         unsigned char c = (unsigned char)*p;
         if (isalnum(c))
             str_append_char(&out, (char)toupper(c));
     }
-
     return out.data;
 }
-
 typedef struct {
     char   *id;
     char   *title;
@@ -617,7 +623,6 @@ typedef struct {
     int     page;
     double  y;
 } Section;
-
 typedef struct {
     int     orig_line;
     int     target;
@@ -626,40 +631,32 @@ typedef struct {
     double  width;
     char   *text;
 } Candidate;
-
 typedef struct {
     int     page;
     int     orig_line;
     double  y;
     char   *text;
 } VisLine;
-
 static int find_section_by_id(Section *secs, size_t n, const char *id)
 {
     if (!id || !id[0])
         return -1;
-
     for (size_t i = 0; i < n; i++) {
         if (strcmp(secs[i].id, id) == 0)
             return (int)i;
     }
-
     return -1;
 }
-
 static int find_section_by_title_norm(Section *secs, size_t n, const char *norm)
 {
     if (!norm || !norm[0])
         return -1;
-
     for (size_t i = 0; i < n; i++) {
         if (strcmp(secs[i].title_norm, norm) == 0)
             return (int)i;
     }
-
     return -1;
 }
-
 static int add_section(Section **secs, size_t *n, size_t *cap,
                        const char *id, const char *title,
                        const char *full, int orig_line)
@@ -668,10 +665,8 @@ static int add_section(Section **secs, size_t *n, size_t *cap,
         *cap = *cap ? *cap * 2 : 32;
         *secs = xrealloc(*secs, *cap * sizeof(Section));
     }
-
     Section *s = &(*secs)[*n];
     memset(s, 0, sizeof(*s));
-
     s->id = xstrdup(id ? id : "");
     s->title = xstrdup(title ? title : "");
     s->full = xstrdup(full ? full : "");
@@ -679,21 +674,17 @@ static int add_section(Section **secs, size_t *n, size_t *cap,
     s->orig_line = orig_line;
     s->page = 0;
     s->y = 0.0;
-
     return (int)(*n)++;
 }
-
 static int add_candidate(Candidate **cands, size_t *n, size_t *cap,
                          int orig_line, int target)
 {
     if (target < 0)
         return -1;
-
     if (*n == *cap) {
         *cap = *cap ? *cap * 2 : 32;
         *cands = xrealloc(*cands, *cap * sizeof(Candidate));
     }
-
     Candidate *c = &(*cands)[*n];
     c->orig_line = orig_line;
     c->target = target;
@@ -701,27 +692,22 @@ static int add_candidate(Candidate **cands, size_t *n, size_t *cap,
     c->y = 0.0;
     c->width = 0.0;
     c->text = NULL;
-
     return (int)(*n)++;
 }
-
 /* ========================================================================
 Font / image enums
 ======================================================================== */
-
 typedef enum {
     FONT_COURIER = 0,
     FONT_HELVETICA,
     FONT_TIMES,
     FONT_CJK
 } FontKind;
-
 typedef enum {
     IMG_UNKNOWN = 0,
     IMG_JPEG,
     IMG_PNG_PASSTHROUGH
 } ImageKind;
-
 typedef struct {
     char          *path;
     unsigned char *data;
@@ -738,7 +724,6 @@ typedef struct {
     double         disp_h;
     int            obj;
 } Image;
-
 typedef struct {
     int    page;
     int    image_idx;
@@ -747,11 +732,9 @@ typedef struct {
     double w;
     double h;
 } ImagePlace;
-
 /* ========================================================================
 Base14 metrics
 ======================================================================== */
-
 static const unsigned short v17_helvetica_ascii[95] = {
     278, 278, 355, 556, 556, 889, 667, 191, 333, 333,
     389, 584, 278, 333, 278, 278, 556, 556, 556, 556,
@@ -764,7 +747,6 @@ static const unsigned short v17_helvetica_ascii[95] = {
     556, 556, 333, 500, 278, 556, 500, 722, 500, 500,
     500, 334, 260, 334, 584
 };
-
 static const unsigned short v17_times_ascii[95] = {
     250, 333, 408, 500, 500, 833, 778, 333, 333, 333,
     500, 564, 250, 333, 250, 278, 500, 500, 500, 500,
@@ -777,18 +759,15 @@ static const unsigned short v17_times_ascii[95] = {
     500, 500, 333, 389, 278, 500, 500, 722, 500, 500,
     444, 480, 200, 480, 541
 };
-
 static int v17_is_space_char(unsigned char c)
 {
     return c == ' ' || c == '\t' || c == 0xA0;
 }
-
 static unsigned char v17_width_base_char(unsigned char c)
 {
     if (c == 0xA0) return ' ';
     if (c == 0xA1) return '!';
     if (c == 0xBF) return '?';
-
     if (c >= 0xC0 && c <= 0xC5) return 'A';
     if (c == 0xC6) return 'A';
     if (c == 0xC7) return 'C';
@@ -800,7 +779,6 @@ static unsigned char v17_width_base_char(unsigned char c)
     if (c == 0xD8) return 'O';
     if (c >= 0xD9 && c <= 0xDC) return 'U';
     if (c == 0xDD) return 'Y';
-
     if (c >= 0xE0 && c <= 0xE5) return 'a';
     if (c == 0xE6) return 'a';
     if (c == 0xE7) return 'c';
@@ -812,38 +790,29 @@ static unsigned char v17_width_base_char(unsigned char c)
     if (c == 0xF8) return 'o';
     if (c >= 0xF9 && c <= 0xFC) return 'u';
     if (c == 0xFD || c == 0xFF) return 'y';
-
     return c;
 }
-
 static unsigned short v17_glyph_width_1000(FontKind font, unsigned char c)
 {
     if (font == FONT_COURIER)
         return 600;
-
     unsigned char b = v17_width_base_char(c);
-
     if (b >= 32 && b <= 126) {
         if (font == FONT_HELVETICA)
             return v17_helvetica_ascii[b - 32];
         else
             return v17_times_ascii[b - 32];
     }
-
     return 500;
 }
-
 static unsigned char v17_winansi_from_cp(int cp)
 {
     if (cp >= 0x20 && cp <= 0x7E)
         return (unsigned char)cp;
-
     if (cp >= 0xA0 && cp <= 0xFF)
         return (unsigned char)cp;
-
     return '?';
 }
-
 static int v17_utf8_seq_len(unsigned char c)
 {
     if (c < 0x80)
@@ -856,7 +825,6 @@ static int v17_utf8_seq_len(unsigned char c)
         return 4;
     return 1;
 }
-
 static int v17_decode_utf8(const unsigned char *p,
                            size_t off,
                            size_t len,
@@ -865,26 +833,20 @@ static int v17_decode_utf8(const unsigned char *p,
 {
     if (off >= len)
         return 0;
-
     unsigned char c = p[off];
     int need = v17_utf8_seq_len(c);
-
     if (need == 1) {
         *cp = c;
         *consume = 1;
         return 1;
     }
-
     if (off + (size_t)need > len)
         return 0;
-
     for (int k = 1; k < need; k++) {
         if ((p[off + (size_t)k] & 0xC0) != 0x80)
             return 0;
     }
-
     int v = 0;
-
     if (need == 2) {
         v = ((c & 0x1F) << 6) | (p[off + 1] & 0x3F);
     } else if (need == 3) {
@@ -897,12 +859,10 @@ static int v17_decode_utf8(const unsigned char *p,
             ((p[off + 2] & 0x3F) << 6) |
             (p[off + 3] & 0x3F);
     }
-
     *cp = v;
     *consume = (size_t)need;
     return 1;
 }
-
 static void v17_advance_char(const char *s,
                              size_t off,
                              size_t slen,
@@ -910,27 +870,21 @@ static void v17_advance_char(const char *s,
                              size_t *out_consume)
 {
     const unsigned char *p = (const unsigned char *)s;
-
     if (g_is_utf8 && p[off] >= 0x80) {
         int cp = 0;
         size_t cons = 1;
-
         if (v17_decode_utf8(p, off, slen, &cp, &cons)) {
             *out_c = v17_winansi_from_cp(cp);
             *out_consume = cons;
             return;
         }
     }
-
     unsigned char c = p[off];
-
     if (c == '\t')
         c = ' ';
-
     *out_c = c;
     *out_consume = 1;
 }
-
 static double v17_text_width_pt(const char *s,
                                 FontKind font,
                                 double font_size,
@@ -938,31 +892,22 @@ static double v17_text_width_pt(const char *s,
 {
     size_t len = strlen(s);
     size_t off = 0;
-
     double total = 0.0;
     double non_space_total = 0.0;
-
     while (off < len) {
         unsigned char c = 0;
         size_t cons = 1;
-
         v17_advance_char(s, off, len, &c, &cons);
-
         double cw = font_size *
                     (double)v17_glyph_width_1000(font, c) /
                     1000.0;
-
         total += cw;
-
         if (!v17_is_space_char(c))
             non_space_total = total;
-
         off += cons;
     }
-
     return trim_trailing ? non_space_total : total;
 }
-
 static void v17_next_visual_chunk(const char *s,
                                   size_t off,
                                   size_t slen,
@@ -973,20 +918,15 @@ static void v17_next_visual_chunk(const char *s,
 {
     double w = 0.0;
     size_t i = off;
-
     size_t last_space = 0;
     size_t last_punct = 0;
-
     while (i < slen) {
         unsigned char c = 0;
         size_t cons = 1;
-
         v17_advance_char(s, i, slen, &c, &cons);
-
         double cw = FONT_SIZE *
                     (double)v17_glyph_width_1000(font, c) /
                     1000.0;
-
         if (w + cw > max_width) {
             if (w == 0.0) {
                 w += cw;
@@ -994,46 +934,36 @@ static void v17_next_visual_chunk(const char *s,
             }
             break;
         }
-
         w += cw;
         i += cons;
-
         if (v17_is_space_char(c))
             last_space = i;
         else if (c == '-' || c == '/')
             last_punct = i;
     }
-
     if (i >= slen) {
         *out_text = xstrndup(s + off, slen - off);
         *out_consume = slen - off;
         return;
     }
-
     size_t break_i = 0;
-
     if (last_space > off)
         break_i = last_space;
     else if (last_punct > off)
         break_i = last_punct;
     else
         break_i = i;
-
     if (break_i <= off) {
         unsigned char c = 0;
         size_t cons = 1;
-
         v17_advance_char(s, off, slen, &c, &cons);
         break_i = off + cons;
     }
-
     if (break_i > slen)
         break_i = slen;
-
     *out_text = xstrndup(s + off, break_i - off);
     *out_consume = break_i - off;
 }
-
 static void v17_append_escaped_char(Str *out, unsigned char c)
 {
     if (c == '\\')
@@ -1045,7 +975,7 @@ static void v17_append_escaped_char(Str *out, unsigned char c)
     else if (c == '\r')
         str_append_str(out, "\\r");
     else if (c == '\n')
-        str_append_str(out, "\n");
+        str_append_str(out, "\\n");
     else if (c == '\t')
         str_append_char(out, ' ');
     else if (c >= 32)
@@ -1053,7 +983,6 @@ static void v17_append_escaped_char(Str *out, unsigned char c)
     else
         str_append_char(out, '?');
 }
-
 static void v17_pdf_escape(const char *s, Str *out)
 {
     if (!out->data) {
@@ -1065,16 +994,13 @@ static void v17_pdf_escape(const char *s, Str *out)
         if (out->cap > 0)
             out->data[0] = '\0';
     }
-
     const unsigned char *p = (const unsigned char *)s;
     size_t len = strlen(s);
     size_t i = 0;
-
     while (i < len) {
         if (g_is_utf8 && p[i] >= 0x80) {
             int cp = 0;
             size_t cons = 1;
-
             if (v17_decode_utf8(p, i, len, &cp, &cons)) {
                 unsigned char w = v17_winansi_from_cp(cp);
                 v17_append_escaped_char(out, w);
@@ -1082,104 +1008,79 @@ static void v17_pdf_escape(const char *s, Str *out)
                 continue;
             }
         }
-
         v17_append_escaped_char(out, p[i]);
         i++;
     }
 }
-
 /* ========================================================================
 Image support (original v1.7)
 ======================================================================== */
-
 static char v17_ascii_tolower(char c)
 {
     if (c >= 'A' && c <= 'Z')
         return (char)(c - 'A' + 'a');
     return c;
 }
-
 static int v17_str_ncasecmp(const char *a, const char *b, size_t n)
 {
     for (size_t i = 0; i < n; i++) {
         char ca = v17_ascii_tolower(a[i]);
         char cb = v17_ascii_tolower(b[i]);
-
         if (ca != cb)
             return 0;
-
         if (ca == '\0')
             return 1;
     }
-
     return 1;
 }
-
 static int v17_has_extension(const char *s, const char *ext)
 {
     size_t ls = strlen(s);
     size_t le = strlen(ext);
-
     if (ls < le)
         return 0;
-
     return v17_str_ncasecmp(s + ls - le, ext, le);
 }
-
 static int v17_has_jpeg_extension(const char *s)
 {
     return v17_has_extension(s, ".jpg") ||
            v17_has_extension(s, ".jpeg");
 }
-
 static int v17_has_png_extension(const char *s)
 {
     return v17_has_extension(s, ".png");
 }
-
 static unsigned v17_jpg_be16(const unsigned char *p)
 {
     return (unsigned)((p[0] << 8) | p[1]);
 }
-
 static int v17_jpg_get_info(const unsigned char *p, size_t n,
                             int *w, int *h, int *comps)
 {
     if (n < 2 || p[0] != 0xFF || p[1] != 0xD8)
         return 0;
-
     size_t i = 2;
-
     while (i + 4 <= n) {
         if (p[i] != 0xFF) {
             i++;
             continue;
         }
-
         while (i < n && p[i] == 0xFF)
             i++;
-
         if (i >= n)
             break;
-
         unsigned char marker = p[i++];
-
         if (marker == 0xD8 || marker == 0x01 ||
             (marker >= 0xD0 && marker <= 0xD9)) {
             continue;
         }
-
         if (marker == 0xDA)
             break;
-
         if (i + 2 > n)
             break;
-
         unsigned seglen = (unsigned)((p[i] << 8) | p[i + 1]);
-
         if (seglen < 2 || i + seglen > n)
             break;
-
         if (marker >= 0xC0 && marker <= 0xCF &&
             marker != 0xC4 && marker != 0xC8 && marker != 0xCC) {
             if (i + 8 <= n) {
@@ -1189,13 +1090,10 @@ static int v17_jpg_get_info(const unsigned char *p, size_t n,
                 return 1;
             }
         }
-
         i += seglen;
     }
-
     return 0;
 }
-
 static unsigned v17_png_be32(const unsigned char *p)
 {
     return ((unsigned)p[0] << 24) |
@@ -1203,25 +1101,19 @@ static unsigned v17_png_be32(const unsigned char *p)
            ((unsigned)p[2] << 8) |
            ((unsigned)p[3]);
 }
-
 static int v17_load_jpeg_passthrough(const char *path, Image *img)
 {
     size_t len = 0;
     char *buf = read_file(path, &len);
-
     if (!buf)
         return 0;
-
     int w = 0, h = 0, comp = 0;
-
     if (!v17_jpg_get_info((const unsigned char *)buf, len, &w, &h, &comp)) {
         free(buf);
         return 0;
     }
-
     if (comp != 1 && comp != 3 && comp != 4)
         comp = 3;
-
     img->data = (unsigned char *)buf;
     img->data_len = len;
     img->kind = IMG_JPEG;
@@ -1232,61 +1124,47 @@ static int v17_load_jpeg_passthrough(const char *path, Image *img)
     img->indexed = 0;
     img->palette = NULL;
     img->palette_len = 0;
-
     return 1;
 }
-
 static int v17_load_png_passthrough(const char *path, Image *img)
 {
     static const unsigned char png_sig[8] = {
         0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A
     };
-
     size_t len = 0;
     char *buf = read_file(path, &len);
-
     if (!buf)
         return 0;
-
     const unsigned char *p = (const unsigned char *)buf;
-
     if (len < 33 || memcmp(p, png_sig, 8) != 0) {
         free(buf);
         return 0;
     }
-
     int width = (int)v17_png_be32(p + 16);
     int height = (int)v17_png_be32(p + 20);
     int bit_depth = p[24];
     int color_type = p[25];
     int interlace = p[28];
-
     if (width <= 0 || height <= 0) {
         free(buf);
         return 0;
     }
-
     if (bit_depth != 8 || interlace != 0 ||
         !(color_type == 0 || color_type == 2 || color_type == 3)) {
         free(buf);
         return 0;
     }
-
     Str idat;
     str_init(&idat);
-
     unsigned char *palette = NULL;
     size_t palette_len = 0;
     size_t pos = 8;
-
     while (pos + 12 <= len) {
         unsigned clen = v17_png_be32(p + pos);
         const unsigned char *type = p + pos + 4;
         const unsigned char *cdata = p + pos + 8;
-
         if (pos + 12 + clen > len)
             break;
-
         if (memcmp(type, "IDAT", 4) == 0) {
             str_append(&idat, (const char *)cdata, clen);
         } else if (memcmp(type, "PLTE", 4) == 0) {
@@ -1297,18 +1175,14 @@ static int v17_load_png_passthrough(const char *path, Image *img)
         } else if (memcmp(type, "IEND", 4) == 0) {
             break;
         }
-
         pos += 12 + clen;
     }
-
     free(buf);
-
     if (idat.len == 0 || (color_type == 3 && palette_len == 0)) {
         str_free(&idat);
         free(palette);
         return 0;
     }
-
     img->data = (unsigned char *)idat.data;
     img->data_len = idat.len;
     img->kind = IMG_PNG_PASSTHROUGH;
@@ -1319,86 +1193,61 @@ static int v17_load_png_passthrough(const char *path, Image *img)
     img->indexed = (color_type == 3);
     img->palette = palette;
     img->palette_len = palette_len;
-
     return 1;
 }
-
 static void v17_compute_image_display_size(Image *img, double max_h)
 {
     double avail_w = PAGE_WIDTH - 2.0 * MARGIN;
     double avail_h = max_h;
-
     if (avail_h <= 0.0)
         avail_h = PAGE_HEIGHT - 2.0 * MARGIN;
-
     double w = (double)img->width;
     double h = (double)img->height;
     double scale = 1.0;
-
     if (w > avail_w)
         scale = avail_w / w;
-
     if (h * scale > avail_h)
         scale = avail_h / h;
-
     if (scale <= 0.0)
         scale = 1.0;
-
     img->disp_w = w * scale;
     img->disp_h = h * scale;
-
     if (img->disp_w < 1.0)
         img->disp_w = 1.0;
-
     if (img->disp_h < 1.0)
         img->disp_h = 1.0;
 }
-
 static int v17_parse_img_line(const char *line, char **path_out)
 {
     const char *open = strstr(line, "[IMG]");
-
     if (!open || open != line)
         return 0;
-
     open += 5;
-
     const char *close = strstr(open, "[/IMG]");
-
     if (!close)
         return 0;
-
     const char *end = close;
-
     while (end > open && isspace((unsigned char)end[-1]))
         end--;
-
     const char *after = close + 6;
-
     while (isspace((unsigned char)*after))
         after++;
-
     if (*after != '\0')
         return 0;
-
     if (end <= open)
         return 0;
-
     *path_out = xstrndup(open, (size_t)(end - open));
     return 1;
 }
-
 static int v17_add_image(Image **imgs, size_t *n, size_t *cap, Image *img)
 {
     if (*n == *cap) {
         *cap = *cap ? *cap * 2 : 16;
         *imgs = xrealloc(*imgs, *cap * sizeof(Image));
     }
-
     (*imgs)[*n] = *img;
     return (int)(*n)++;
 }
-
 static int v17_add_image_placement(ImagePlace **places, size_t *n, size_t *cap,
                                    int page, int image_idx,
                                    double x, double y, double w, double h)
@@ -1407,7 +1256,6 @@ static int v17_add_image_placement(ImagePlace **places, size_t *n, size_t *cap,
         *cap = *cap ? *cap * 2 : 32;
         *places = xrealloc(*places, *cap * sizeof(ImagePlace));
     }
-
     ImagePlace *p = &(*places)[*n];
     p->page = page;
     p->image_idx = image_idx;
@@ -1415,51 +1263,38 @@ static int v17_add_image_placement(ImagePlace **places, size_t *n, size_t *cap,
     p->y = y;
     p->w = w;
     p->h = h;
-
     return (int)(*n)++;
 }
-
 /* ========================================================================
 CJK / TTF module
 ======================================================================== */
-
 typedef struct {
     uint32_t cp;
     uint16_t gid;
 } CjkCmapPair;
-
 typedef struct {
     unsigned char *data;
     size_t len;
-
     uint16_t units_per_em;
     int ascent;
     int descent;
     int bbox[4];
-
     uint16_t num_glyphs;
     uint16_t num_hmetrics;
-
     const unsigned char *hmtx;
     size_t hmtx_len;
-
     uint16_t *advance;
     size_t advance_len;
-
     CjkCmapPair *cmap;
     size_t cmap_n;
     size_t cmap_cap;
-
     char ps_name[128];
 } CjkFont;
-
 static CjkFont g_cjk;
-
 static uint16_t ttf_be16(const unsigned char *p)
 {
     return (uint16_t)((p[0] << 8) | p[1]);
 }
-
 static uint32_t ttf_be32(const unsigned char *p)
 {
     return ((uint32_t)p[0] << 24) |
@@ -1467,13 +1302,11 @@ static uint32_t ttf_be32(const unsigned char *p)
            ((uint32_t)p[2] << 8) |
            ((uint32_t)p[3]);
 }
-
 static void put_be16(unsigned char *p, uint16_t v)
 {
     p[0] = (v >> 8) & 0xFF;
     p[1] = v & 0xFF;
 }
-
 static void put_be32(unsigned char *p, uint32_t v)
 {
     p[0] = (v >> 24) & 0xFF;
@@ -1481,7 +1314,6 @@ static void put_be32(unsigned char *p, uint32_t v)
     p[2] = (v >> 8) & 0xFF;
     p[3] = v & 0xFF;
 }
-
 static const unsigned char *ttf_find_table(const unsigned char *d,
                                            size_t n,
                                            const char tag[4],
@@ -1489,187 +1321,140 @@ static const unsigned char *ttf_find_table(const unsigned char *d,
 {
     if (n < 12)
         return NULL;
-
     uint16_t num_tables = ttf_be16(d + 4);
     const unsigned char *p = d + 12;
-
     for (uint16_t i = 0; i < num_tables; i++) {
         if ((size_t)(p - d) + 16 > n)
             return NULL;
-
         if (memcmp(p, tag, 4) == 0) {
             uint32_t off = ttf_be32(p + 8);
             uint32_t len = ttf_be32(p + 12);
-
             if (off > n || len > n || (size_t)off + (size_t)len > n)
                 return NULL;
-
             if (out_len)
                 *out_len = len;
-
             return d + off;
         }
-
         p += 16;
     }
-
     return NULL;
 }
-
 static uint32_t ttf_table_checksum(const unsigned char *data, size_t len)
 {
     uint32_t sum = 0;
     size_t i = 0;
-
     while (i + 4 <= len) {
         sum += ttf_be32(data + i);
         i += 4;
     }
-
     if (i < len) {
         unsigned char buf[4] = {0};
         memcpy(buf, data + i, len - i);
         sum += ttf_be32(buf);
     }
-
     return sum;
 }
-
 static void cjk_make_ps_name(const char *path, char *out, size_t outsz)
 {
     const char *base = strrchr(path, '/');
-
 #ifdef _WIN32
     const char *base2 = strrchr(path, '\\');
     if (base2 && (!base || base2 > base))
         base = base2;
 #endif
-
     if (base && base[0])
         base++;
     else
         base = path;
-
     size_t o = 0;
-
     for (size_t i = 0; base[i] && o + 1 < outsz; i++) {
         unsigned char c = (unsigned char)base[i];
-
         if (c == '.')
             break;
-
         if (isalnum(c))
             out[o++] = (char)c;
         else
             out[o++] = '-';
     }
-
     out[o] = '\0';
-
     if (o == 0)
         snprintf(out, outsz, "EmbeddedTTF");
 }
-
 static void cjk_cmap_add(CjkFont *f, uint32_t cp, uint16_t gid)
 {
     if (gid == 0)
         return;
-
     if (cp > 0x10FFFF)
         return;
-
     if (f->cmap_n == f->cmap_cap) {
         f->cmap_cap = f->cmap_cap ? f->cmap_cap * 2 : 8192;
         f->cmap = xrealloc(f->cmap, f->cmap_cap * sizeof(CjkCmapPair));
     }
-
     f->cmap[f->cmap_n].cp = cp;
     f->cmap[f->cmap_n].gid = gid;
     f->cmap_n++;
 }
-
 static int cjk_cmp_cp(const void *a, const void *b)
 {
     const CjkCmapPair *x = (const CjkCmapPair *)a;
     const CjkCmapPair *y = (const CjkCmapPair *)b;
-
     if (x->cp < y->cp) return -1;
     if (x->cp > y->cp) return 1;
     return 0;
 }
-
 static void cjk_parse_cmap_12(CjkFont *f,
                               const unsigned char *st,
                               size_t st_len)
 {
     if (st_len < 16)
         return;
-
     uint32_t num_groups = ttf_be32(st + 12);
-
     if (16 + (uint64_t)num_groups * 12 > st_len)
         return;
-
     for (uint32_t i = 0; i < num_groups; i++) {
         const unsigned char *g = st + 16 + i * 12;
-
         uint32_t start_char = ttf_be32(g);
         uint32_t end_char = ttf_be32(g + 4);
         uint32_t start_gid = ttf_be32(g + 8);
-
         if (end_char < start_char)
             continue;
-
         if (end_char - start_char > 0x200000)
             continue;
-
         for (uint64_t cp64 = start_char; cp64 <= end_char; cp64++) {
             uint32_t gid32 = start_gid + (uint32_t)(cp64 - start_char);
-
             if (gid32 > 0xFFFF)
                 break;
-
             cjk_cmap_add(f, (uint32_t)cp64, (uint16_t)gid32);
         }
     }
 }
-
 static void cjk_parse_cmap_4(CjkFont *f,
                              const unsigned char *st,
                              size_t st_len)
 {
     if (st_len < 14)
         return;
-
     uint16_t seg_count_x2 = ttf_be16(st + 6);
     uint16_t seg_count = seg_count_x2 / 2;
-
     if (seg_count == 0)
         return;
-
     size_t end_off = 14;
     size_t start_off = end_off + seg_count_x2 + 2;
     size_t delta_off = start_off + seg_count_x2;
     size_t range_off = delta_off + seg_count_x2;
-
     if (range_off + seg_count_x2 > st_len)
         return;
-
     for (uint16_t i = 0; i < seg_count; i++) {
         uint16_t end_code = ttf_be16(st + end_off + i * 2);
         uint16_t start_code = ttf_be16(st + start_off + i * 2);
         int16_t id_delta = (int16_t)ttf_be16(st + delta_off + i * 2);
         uint16_t id_range = ttf_be16(st + range_off + i * 2);
-
         if (start_code == 0xFFFF)
             break;
-
         if (end_code < start_code)
             continue;
-
         for (uint32_t c = start_code; c <= end_code; c++) {
             uint16_t gid = 0;
-
             if (id_range == 0) {
                 gid = (uint16_t)((c + id_delta) & 0xFFFF);
             } else {
@@ -1677,50 +1462,36 @@ static void cjk_parse_cmap_4(CjkFont *f,
                 size_t glyph_off = (size_t)(entry - st) +
                                    id_range +
                                    2 * (c - start_code);
-
                 if (glyph_off + 2 > st_len)
                     continue;
-
                 gid = ttf_be16(st + glyph_off);
-
                 if (gid != 0)
                     gid = (uint16_t)((gid + id_delta) & 0xFFFF);
             }
-
             cjk_cmap_add(f, c, gid);
         }
     }
 }
-
 static int cjk_parse_cmap(CjkFont *f,
                           const unsigned char *cmap,
                           size_t cmap_len)
 {
     if (cmap_len < 4)
         return 0;
-
     uint16_t num_subtables = ttf_be16(cmap + 2);
-
     uint32_t best_off = 0;
     int best_score = -1;
-
     for (uint16_t i = 0; i < num_subtables; i++) {
         const unsigned char *rec = cmap + 4 + i * 8;
-
         if ((size_t)(rec - cmap) + 8 > cmap_len)
             break;
-
         uint16_t platform = ttf_be16(rec);
         uint16_t encoding = ttf_be16(rec + 2);
         uint32_t offset = ttf_be32(rec + 4);
-
         if (offset >= cmap_len)
             continue;
-
         uint16_t format = ttf_be16(cmap + offset);
-
         int score = -1;
-
         if (platform == 3 && encoding == 10 && format == 12)
             score = 100;
         else if (platform == 0 && format == 12)
@@ -1729,54 +1500,40 @@ static int cjk_parse_cmap(CjkFont *f,
             score = 80;
         else if (platform == 0 && format == 4)
             score = 70;
-
         if (score > best_score) {
             best_score = score;
             best_off = offset;
         }
     }
-
     if (best_score < 0)
         return 0;
-
     const unsigned char *st = cmap + best_off;
     size_t st_len = cmap_len - best_off;
-
     uint16_t format = ttf_be16(st);
-
     if (format == 12)
         cjk_parse_cmap_12(f, st, st_len);
     else if (format == 4)
         cjk_parse_cmap_4(f, st, st_len);
     else
         return 0;
-
     if (f->cmap_n == 0)
         return 0;
-
     qsort(f->cmap, f->cmap_n, sizeof(CjkCmapPair), cjk_cmp_cp);
-
     size_t w = 0;
-
     for (size_t i = 0; i < f->cmap_n; i++) {
         if (i > 0 && f->cmap[i].cp == f->cmap[i - 1].cp)
             continue;
-
         f->cmap[w++] = f->cmap[i];
     }
-
     f->cmap_n = w;
     return 1;
 }
-
 static uint16_t cjk_gid_of(const CjkFont *f, uint32_t cp)
 {
     size_t lo = 0;
     size_t hi = f->cmap_n;
-
     while (lo < hi) {
         size_t mid = lo + (hi - lo) / 2;
-
         if (f->cmap[mid].cp < cp)
             lo = mid + 1;
         else if (f->cmap[mid].cp > cp)
@@ -1784,18 +1541,14 @@ static uint16_t cjk_gid_of(const CjkFont *f, uint32_t cp)
         else
             return f->cmap[mid].gid;
     }
-
     return 0;
 }
-
 static void cjk_update_cmap_gid(CjkFont *f, uint32_t cp, uint16_t gid)
 {
     size_t lo = 0;
     size_t hi = f->cmap_n;
-
     while (lo < hi) {
         size_t mid = lo + (hi - lo) / 2;
-
         if (f->cmap[mid].cp < cp)
             lo = mid + 1;
         else if (f->cmap[mid].cp > cp)
@@ -1806,81 +1559,61 @@ static void cjk_update_cmap_gid(CjkFont *f, uint32_t cp, uint16_t gid)
         }
     }
 }
-
 static int cjk_load_ttf(const char *path, CjkFont *f)
 {
     memset(f, 0, sizeof(*f));
-
     size_t len = 0;
     char *buf = read_file(path, &len);
-
     if (!buf) {
         fprintf(stderr, "CJK font error: cannot open/read '%s'\n", path);
         return 0;
     }
-
     f->data = (unsigned char *)buf;
     f->len = len;
-
     if (f->len < 12) {
         fprintf(stderr, "CJK font error: '%s' too small\n", path);
         goto fail;
     }
-
     uint32_t sfnt = ttf_be32(f->data);
-
     if (sfnt != 0x00010000 && memcmp(f->data, "true", 4) != 0) {
         fprintf(stderr,
                 "Font '%s' is not TrueType. Use .ttf, not .otf/.ttc.\n",
                 path);
         goto fail;
     }
-
     size_t head_len = 0, hhea_len = 0, maxp_len = 0, hmtx_len = 0, cmap_len = 0;
-
     const unsigned char *head = ttf_find_table(f->data, f->len, "head", &head_len);
     const unsigned char *hhea = ttf_find_table(f->data, f->len, "hhea", &hhea_len);
     const unsigned char *maxp = ttf_find_table(f->data, f->len, "maxp", &maxp_len);
     const unsigned char *hmtx = ttf_find_table(f->data, f->len, "hmtx", &hmtx_len);
     const unsigned char *cmap = ttf_find_table(f->data, f->len, "cmap", &cmap_len);
-
     if (!head || !hhea || !maxp || !hmtx || !cmap) {
         fprintf(stderr, "Font '%s' missing required tables.\n", path);
         goto fail;
     }
-
     if (head_len < 54 || hhea_len < 36 || maxp_len < 6) {
         fprintf(stderr, "Font '%s' truncated tables.\n", path);
         goto fail;
     }
-
     f->units_per_em = ttf_be16(head + 18);
-
     f->bbox[0] = (int16_t)ttf_be16(head + 36);
     f->bbox[1] = (int16_t)ttf_be16(head + 38);
     f->bbox[2] = (int16_t)ttf_be16(head + 40);
     f->bbox[3] = (int16_t)ttf_be16(head + 42);
-
     f->ascent = (int16_t)ttf_be16(hhea + 4);
     f->descent = (int16_t)ttf_be16(hhea + 6);
-
     f->num_hmetrics = ttf_be16(hhea + 34);
     f->num_glyphs = ttf_be16(maxp + 4);
-
     if (f->units_per_em == 0 || f->num_hmetrics == 0 || f->num_glyphs == 0) {
         fprintf(stderr, "Font '%s' invalid metrics.\n", path);
         goto fail;
     }
-
     f->hmtx = hmtx;
     f->hmtx_len = hmtx_len;
-
     f->advance = xmalloc(sizeof(uint16_t) * (size_t)f->num_glyphs);
     f->advance_len = f->num_glyphs;
-
     for (uint16_t gid = 0; gid < f->num_glyphs; gid++) {
         uint16_t adv = 1000;
-
         if (gid < f->num_hmetrics) {
             size_t off = (size_t)gid * 4;
             if (off + 2 <= hmtx_len)
@@ -1890,19 +1623,14 @@ static int cjk_load_ttf(const char *path, CjkFont *f)
             if (off + 2 <= hmtx_len)
                 adv = ttf_be16(hmtx + off);
         }
-
         f->advance[gid] = adv;
     }
-
     if (!cjk_parse_cmap(f, cmap, cmap_len)) {
         fprintf(stderr, "Font '%s' has no usable Unicode cmap.\n", path);
         goto fail;
     }
-
     cjk_make_ps_name(path, f->ps_name, sizeof(f->ps_name));
-
     return 1;
-
 fail:
     free(f->data);
     free(f->advance);
@@ -1910,7 +1638,6 @@ fail:
     memset(f, 0, sizeof(*f));
     return 0;
 }
-
 static int decode_next_cp(const char *s,
                           size_t off,
                           size_t len,
@@ -1919,92 +1646,70 @@ static int decode_next_cp(const char *s,
 {
     if (off >= len)
         return 0;
-
     const unsigned char *p = (const unsigned char *)s;
-
     if (g_is_utf8 && p[off] >= 0x80) {
         int icp = 0;
         size_t cons = 1;
-
         if (v17_decode_utf8(p, off, len, &icp, &cons)) {
             *cp = (uint32_t)icp;
             *consume = cons;
             return 1;
         }
     }
-
     *cp = p[off];
     *consume = 1;
     return 1;
 }
-
 static int cjk_pdf_width_1000(const CjkFont *f, uint16_t adv)
 {
     if (f->units_per_em == 0)
         return 1000;
-
     double w = (double)adv * 1000.0 / (double)f->units_per_em;
     return (int)(w + 0.5);
 }
-
 static uint16_t cjk_gid_of_cp(const CjkFont *f, uint32_t cp)
 {
     uint16_t gid = cjk_gid_of(f, cp);
-
     if (gid == 0)
         gid = cjk_gid_of(f, '?');
-
     return gid;
 }
-
 static double cjk_cp_width_pt(const CjkFont *f,
                               uint32_t cp,
                               double font_size)
 {
     uint16_t gid = cjk_gid_of_cp(f, cp);
     uint16_t adv = 1000;
-
     if (gid < f->advance_len)
         adv = f->advance[gid];
-
     int w1000 = cjk_pdf_width_1000(f, adv);
     return font_size * (double)w1000 / 1000.0;
 }
-
 static double cjk_text_width_pt(const char *s,
                                 double font_size,
                                 int trim_trailing)
 {
     size_t len = strlen(s);
     size_t off = 0;
-
     double total = 0.0;
     double non_space_total = 0.0;
-
     while (off < len) {
         uint32_t cp = 0;
         size_t cons = 1;
-
         if (!decode_next_cp(s, off, len, &cp, &cons))
             break;
-
         if (cp == 0xFEFF) {
             off += cons;
             continue;
         }
-
         double cw = cjk_cp_width_pt(&g_cjk, cp, font_size);
         total += cw;
-
         if (!(cp == ' ' || cp == '\t' || cp == 0xA0))
             non_space_total = total;
-
         off += cons;
     }
-
     return trim_trailing ? non_space_total : total;
 }
-
 static void cjk_next_visual_chunk(const char *s,
                                   size_t off,
                                   size_t slen,
@@ -2014,24 +1719,18 @@ static void cjk_next_visual_chunk(const char *s,
 {
     double w = 0.0;
     size_t i = off;
-
     size_t last_space = 0;
     size_t last_punct = 0;
-
     while (i < slen) {
         uint32_t cp = 0;
         size_t cons = 1;
-
         if (!decode_next_cp(s, i, slen, &cp, &cons))
             break;
-
         if (cp == 0xFEFF) {
             i += cons;
             continue;
         }
-
         double cw = cjk_cp_width_pt(&g_cjk, cp, FONT_SIZE);
-
         if (w + cw > max_width) {
             if (w == 0.0) {
                 w += cw;
@@ -2039,46 +1738,36 @@ static void cjk_next_visual_chunk(const char *s,
             }
             break;
         }
-
         w += cw;
         i += cons;
-
         if (cp == ' ' || cp == '\t' || cp == 0xA0)
             last_space = i;
         else if (cp == '-' || cp == '/')
             last_punct = i;
     }
-
     if (i >= slen) {
         *out_text = xstrndup(s + off, slen - off);
         *out_consume = slen - off;
         return;
     }
-
     size_t break_i = 0;
-
     if (last_space > off)
         break_i = last_space;
     else if (last_punct > off)
         break_i = last_punct;
     else
         break_i = i;
-
     if (break_i <= off) {
         uint32_t cp = 0;
         size_t cons = 1;
-
         decode_next_cp(s, off, slen, &cp, &cons);
         break_i = off + cons;
     }
-
     if (break_i > slen)
         break_i = slen;
-
     *out_text = xstrndup(s + off, break_i - off);
     *out_consume = break_i - off;
 }
-
 static void append_utf16be_cp(Str *out, uint32_t cp)
 {
     if (cp <= 0xFFFF) {
@@ -2090,7 +1779,6 @@ static void append_utf16be_cp(Str *out, uint32_t cp)
         str_appendf(out, "%04X%04X", hi, lo);
     }
 }
-
 static void cjk_escape_hex(const char *s, Str *out)
 {
     if (!out->data) {
@@ -2099,33 +1787,24 @@ static void cjk_escape_hex(const char *s, Str *out)
         out->len = 0;
         out->data[0] = '\0';
     }
-
     str_append_char(out, '<');
-
     size_t len = strlen(s);
     size_t i = 0;
-
     while (i < len) {
         uint32_t cp = 0;
         size_t cons = 1;
-
         if (!decode_next_cp(s, i, len, &cp, &cons))
             break;
-
         if (cp == 0xFEFF) {
             i += cons;
             continue;
         }
-
         uint16_t gid = cjk_gid_of_cp(&g_cjk, cp);
         str_appendf(out, "%04X", gid);
-
         i += cons;
     }
-
     str_append_char(out, '>');
 }
-
 static void pdf_escape_utf16be_hex(const char *s, Str *out)
 {
     if (!out->data) {
@@ -2134,59 +1813,46 @@ static void pdf_escape_utf16be_hex(const char *s, Str *out)
         out->len = 0;
         out->data[0] = '\0';
     }
-
     str_append_str(out, "<FEFF");
-
     size_t len = strlen(s);
     size_t i = 0;
-
     while (i < len) {
         uint32_t cp = 0;
         size_t cons = 1;
-
         if (!decode_next_cp(s, i, len, &cp, &cons))
             break;
-
         if (cp == 0xFEFF) {
             i += cons;
             continue;
         }
-
         append_utf16be_cp(out, cp);
         i += cons;
     }
-
     str_append_char(out, '>');
 }
-
 typedef struct {
     uint32_t cp;
     uint16_t gid;
     uint16_t adv;
 } UsedGlyph;
-
 static int used_cmp_cp(const void *a, const void *b)
 {
     const UsedGlyph *x = (const UsedGlyph *)a;
     const UsedGlyph *y = (const UsedGlyph *)b;
-
     if (x->cp < y->cp) return -1;
     if (x->cp > y->cp) return 1;
     return 0;
 }
-
 static int used_cmp_gid(const void *a, const void *b)
 {
     const UsedGlyph *x = (const UsedGlyph *)a;
     const UsedGlyph *y = (const UsedGlyph *)b;
-
     if (x->gid < y->gid) return -1;
     if (x->gid > y->gid) return 1;
     if (x->cp < y->cp) return -1;
     if (x->cp > y->cp) return 1;
     return 0;
 }
-
 static void used_add(UsedGlyph **u,
                      size_t *n,
                      size_t *cap,
@@ -2198,13 +1864,11 @@ static void used_add(UsedGlyph **u,
         *cap = *cap ? *cap * 2 : 256;
         *u = xrealloc(*u, *cap * sizeof(UsedGlyph));
     }
-
     (*u)[*n].cp = cp;
     (*u)[*n].gid = gid;
     (*u)[*n].adv = adv;
     (*n)++;
 }
-
 static void collect_used_string(const char *s,
                                 UsedGlyph **u,
                                 size_t *n,
@@ -2212,69 +1876,49 @@ static void collect_used_string(const char *s,
 {
     size_t len = strlen(s);
     size_t i = 0;
-
     while (i < len) {
         uint32_t cp = 0;
         size_t cons = 1;
-
         if (!decode_next_cp(s, i, len, &cp, &cons))
             break;
-
         if (cp == 0xFEFF) {
             i += cons;
             continue;
         }
-
         uint16_t gid = cjk_gid_of(&g_cjk, cp);
-
         if (gid == 0)
             gid = cjk_gid_of(&g_cjk, '?');
-
         if (gid != 0) {
             uint16_t adv = 1000;
-
             if (gid < g_cjk.advance_len)
                 adv = g_cjk.advance[gid];
-
             used_add(u, n, cap, cp, gid, adv);
         }
-
         i += cons;
     }
 }
-
 static size_t used_make_unique(UsedGlyph *u, size_t n)
 {
     if (n == 0)
         return 0;
-
     qsort(u, n, sizeof(UsedGlyph), used_cmp_cp);
-
     size_t w = 1;
-
     for (size_t i = 1; i < n; i++) {
         if (u[i].cp != u[w - 1].cp)
             u[w++] = u[i];
     }
-
     n = w;
-
     qsort(u, n, sizeof(UsedGlyph), used_cmp_gid);
-
     w = 1;
-
     for (size_t i = 1; i < n; i++) {
         if (u[i].gid != u[w - 1].gid)
             u[w++] = u[i];
     }
-
     return w;
 }
-
 /* ------------------------------------------------------------------------
 TTF subsetting
 ------------------------------------------------------------------------ */
-
 typedef struct {
     uint32_t offset;
     uint32_t length;
@@ -2283,11 +1927,9 @@ typedef struct {
     size_t n_components;
     size_t cap_components;
 } RawGlyph;
-
 typedef struct {
     const unsigned char *data;
     size_t len;
-
     const unsigned char *head; size_t head_len;
     const unsigned char *hhea; size_t hhea_len;
     const unsigned char *maxp; size_t maxp_len;
@@ -2300,34 +1942,26 @@ typedef struct {
     const unsigned char *cvt;  size_t cvt_len;
     const unsigned char *fpgm; size_t fpgm_len;
     const unsigned char *prep; size_t prep_len;
-
     int loc_format;
     uint16_t num_glyphs;
     uint16_t units_per_em;
     uint16_t num_hmetrics;
-
     RawGlyph *raw_glyphs;
 } TtfRaw;
-
 static void ttf_raw_free(TtfRaw *r)
 {
     if (!r || !r->raw_glyphs)
         return;
-
     for (uint32_t g = 0; g < r->num_glyphs; g++)
         free(r->raw_glyphs[g].components);
-
     free(r->raw_glyphs);
     r->raw_glyphs = NULL;
 }
-
 static int ttf_raw_load(CjkFont *f, TtfRaw *r)
 {
     memset(r, 0, sizeof(*r));
-
     r->data = f->data;
     r->len = f->len;
-
     r->head = ttf_find_table(f->data, f->len, "head", &r->head_len);
     r->hhea = ttf_find_table(f->data, f->len, "hhea", &r->hhea_len);
     r->maxp = ttf_find_table(f->data, f->len, "maxp", &r->maxp_len);
@@ -2340,21 +1974,16 @@ static int ttf_raw_load(CjkFont *f, TtfRaw *r)
     r->cvt  = ttf_find_table(f->data, f->len, "cvt ", &r->cvt_len);
     r->fpgm = ttf_find_table(f->data, f->len, "fpgm", &r->fpgm_len);
     r->prep = ttf_find_table(f->data, f->len, "prep", &r->prep_len);
-
     if (!r->head || !r->hhea || !r->maxp || !r->hmtx || !r->glyf || !r->loca)
         return 0;
-
     r->loc_format = ttf_be16(r->head + 50);
     r->units_per_em = ttf_be16(r->head + 18);
     r->num_glyphs = ttf_be16(r->maxp + 4);
     r->num_hmetrics = ttf_be16(r->hhea + 34);
-
     r->raw_glyphs = xmalloc(sizeof(RawGlyph) * (size_t)r->num_glyphs);
     memset(r->raw_glyphs, 0, sizeof(RawGlyph) * (size_t)r->num_glyphs);
-
     for (uint32_t g = 0; g < r->num_glyphs; g++) {
         uint32_t off, next_off;
-
         if (r->loc_format == 0) {
             off = (uint32_t)ttf_be16(r->loca + g * 2) * 2;
             next_off = (uint32_t)ttf_be16(r->loca + (g + 1) * 2) * 2;
@@ -2362,107 +1991,82 @@ static int ttf_raw_load(CjkFont *f, TtfRaw *r)
             off = ttf_be32(r->loca + g * 4);
             next_off = ttf_be32(r->loca + (g + 1) * 4);
         }
-
         if (off > r->glyf_len)
             off = (uint32_t)r->glyf_len;
-
         if (next_off > r->glyf_len)
             next_off = (uint32_t)r->glyf_len;
-
         r->raw_glyphs[g].offset = off;
         r->raw_glyphs[g].length = (next_off > off) ? (next_off - off) : 0;
-
         if (r->raw_glyphs[g].length >= 2 && off + 2 <= r->glyf_len) {
             int16_t n_contours = (int16_t)ttf_be16(r->glyf + off);
-
             if (n_contours == -1) {
                 r->raw_glyphs[g].is_compound = 1;
-
                 size_t p = off + 10;
                 int more = 1;
-
                 while (more && p + 4 <= off + r->raw_glyphs[g].length) {
                     uint16_t flags = ttf_be16(r->glyf + p);
                     uint16_t gid = ttf_be16(r->glyf + p + 2);
                     p += 4;
-
                     if (r->raw_glyphs[g].n_components == r->raw_glyphs[g].cap_components) {
                         r->raw_glyphs[g].cap_components =
                             r->raw_glyphs[g].cap_components ?
                             r->raw_glyphs[g].cap_components * 2 : 8;
-
                         r->raw_glyphs[g].components = xrealloc(
                             r->raw_glyphs[g].components,
                             sizeof(uint16_t) * r->raw_glyphs[g].cap_components);
                     }
-
                     r->raw_glyphs[g].components[r->raw_glyphs[g].n_components++] = gid;
-
                     if (flags & 0x0001) p += 4;
                     else p += 2;
-
                     if (flags & 0x0008) p += 2;
                     else if (flags & 0x0040) p += 4;
                     else if (flags & 0x0080) p += 8;
-
                     more = (flags & 0x0020) != 0;
                 }
             }
         }
     }
-
     return 1;
 }
-
 static void ttf_raw_resolve(TtfRaw *r, uint8_t *needed, uint16_t gid)
 {
     if (gid >= r->num_glyphs || needed[gid])
         return;
-
     needed[gid] = 1;
-
     if (r->raw_glyphs[gid].is_compound) {
         for (size_t i = 0; i < r->raw_glyphs[gid].n_components; i++)
             ttf_raw_resolve(r, needed, r->raw_glyphs[gid].components[i]);
     }
 }
-
 static void build_cmap_subset(Str *out, UsedGlyph *used, size_t nused)
 {
     UsedGlyph *by_cp = xmalloc(sizeof(UsedGlyph) * (nused ? nused : 1));
     memcpy(by_cp, used, sizeof(UsedGlyph) * nused);
     qsort(by_cp, nused, sizeof(UsedGlyph), used_cmp_cp);
-
     size_t sub_len = 16 + 12 * nused;
     unsigned char *sub = xmalloc(sub_len);
-
     put_be16(sub + 0, 12);
     put_be16(sub + 2, 0);
     put_be32(sub + 4, (uint32_t)sub_len);
     put_be32(sub + 8, 0);
     put_be32(sub + 12, (uint32_t)nused);
-
     for (size_t i = 0; i < nused; i++) {
         unsigned char *g = sub + 16 + i * 12;
         put_be32(g + 0, by_cp[i].cp);
         put_be32(g + 4, by_cp[i].cp);
         put_be32(g + 8, by_cp[i].gid);
     }
-
     unsigned char header[12];
     put_be16(header + 0, 0);
     put_be16(header + 2, 1);
     put_be16(header + 4, 3);
     put_be16(header + 6, 10);
     put_be32(header + 8, 12);
-
     str_append(out, (const char *)header, 12);
     str_append(out, (const char *)sub, sub_len);
-
     free(sub);
     free(by_cp);
 }
-
 static int cjk_build_subset(CjkFont *f,
                             UsedGlyph *used,
                             size_t nused,
@@ -2470,58 +2074,44 @@ static int cjk_build_subset(CjkFont *f,
                             size_t *out_len)
 {
     TtfRaw r;
-
     if (!ttf_raw_load(f, &r))
         return 0;
-
     uint8_t *needed = xmalloc(r.num_glyphs);
     memset(needed, 0, r.num_glyphs);
     needed[0] = 1;
-
     for (size_t i = 0; i < nused; i++) {
         if (used[i].gid < r.num_glyphs)
             ttf_raw_resolve(&r, needed, used[i].gid);
     }
-
     uint16_t sub_count = 0;
     uint16_t *old_to_new = xmalloc(sizeof(uint16_t) * r.num_glyphs);
     memset(old_to_new, 0, sizeof(uint16_t) * r.num_glyphs);
-
     for (uint32_t g = 0; g < r.num_glyphs; g++) {
         if (needed[g])
             old_to_new[g] = sub_count++;
     }
-
     UsedGlyph *mapped = xmalloc(sizeof(UsedGlyph) * (nused ? nused : 1));
-
     for (size_t i = 0; i < nused; i++) {
         mapped[i] = used[i];
         mapped[i].gid = (used[i].gid < r.num_glyphs) ? old_to_new[used[i].gid] : 0;
     }
-
     unsigned char *sub_head = xmalloc(r.head_len);
     memcpy(sub_head, r.head, r.head_len);
     sub_head[8] = sub_head[9] = sub_head[10] = sub_head[11] = 0;
-
     unsigned char *sub_maxp = xmalloc(r.maxp_len);
     memcpy(sub_maxp, r.maxp, r.maxp_len);
     put_be16(sub_maxp + 4, sub_count);
-
     unsigned char *sub_hhea = xmalloc(r.hhea_len);
     memcpy(sub_hhea, r.hhea, r.hhea_len);
     put_be16(sub_hhea + 34, sub_count);
-
     size_t sub_hmtx_len = (size_t)sub_count * 4;
     unsigned char *sub_hmtx = xmalloc(sub_hmtx_len);
-
     for (uint32_t g = 0; g < r.num_glyphs; g++) {
         if (!needed[g])
             continue;
-
         uint16_t ng = old_to_new[g];
         uint16_t adv = 1000;
         int16_t lsb = 0;
-
         if (g < r.num_hmetrics) {
             size_t off = (size_t)g * 4;
             if (off + 4 <= r.hmtx_len) {
@@ -2532,130 +2122,97 @@ static int cjk_build_subset(CjkFont *f,
             size_t off = (size_t)(r.num_hmetrics - 1) * 4;
             if (off + 2 <= r.hmtx_len)
                 adv = ttf_be16(r.hmtx + off);
-
             size_t lsb_off = (size_t)r.num_hmetrics * 4 +
                              (size_t)(g - r.num_hmetrics) * 2;
-
             if (lsb_off + 2 <= r.hmtx_len)
                 lsb = (int16_t)ttf_be16(r.hmtx + lsb_off);
         }
-
         size_t off = (size_t)ng * 4;
         put_be16(sub_hmtx + off, adv);
         put_be16(sub_hmtx + off + 2, (uint16_t)lsb);
     }
-
     Str sub_glyf;
     str_init(&sub_glyf);
-
     uint32_t *sub_loca = xmalloc(sizeof(uint32_t) * (sub_count + 1));
-
     for (uint32_t g = 0; g < r.num_glyphs; g++) {
         if (!needed[g])
             continue;
-
         uint16_t ng = old_to_new[g];
         sub_loca[ng] = (uint32_t)sub_glyf.len;
-
         if (r.raw_glyphs[g].length > 0) {
             const unsigned char *src = r.glyf + r.raw_glyphs[g].offset;
             size_t len = r.raw_glyphs[g].length;
-
             if (r.raw_glyphs[g].is_compound) {
                 unsigned char *copy = xmalloc(len);
                 memcpy(copy, src, len);
-
                 size_t p = 10;
                 int more = 1;
-
                 while (more && p + 4 <= len) {
                     uint16_t flags = ttf_be16(copy + p);
                     uint16_t old_gid = ttf_be16(copy + p + 2);
                     uint16_t new_comp = (old_gid < r.num_glyphs) ? old_to_new[old_gid] : 0;
-
                     put_be16(copy + p + 2, new_comp);
                     p += 4;
-
                     if (flags & 0x0001) p += 4;
                     else p += 2;
-
                     if (flags & 0x0008) p += 2;
                     else if (flags & 0x0040) p += 4;
                     else if (flags & 0x0080) p += 8;
-
                     more = (flags & 0x0020) != 0;
                 }
-
                 str_append(&sub_glyf, (const char *)copy, len);
                 free(copy);
             } else {
                 str_append(&sub_glyf, (const char *)src, len);
             }
-
             size_t pad = (4 - (sub_glyf.len % 4)) % 4;
             for (size_t k = 0; k < pad; k++)
                 str_append_char(&sub_glyf, '\0');
         }
     }
-
     sub_loca[sub_count] = (uint32_t)sub_glyf.len;
-
     int use_short_loca = 1;
-
     for (uint32_t i = 0; i <= sub_count; i++) {
         if (sub_loca[i] % 2 != 0 || sub_loca[i] / 2 > 0xFFFF) {
             use_short_loca = 0;
             break;
         }
     }
-
     unsigned char *sub_loca_bytes;
     size_t sub_loca_len;
-
     if (use_short_loca) {
         sub_loca_len = (size_t)(sub_count + 1) * 2;
         sub_loca_bytes = xmalloc(sub_loca_len);
-
         for (uint32_t i = 0; i <= sub_count; i++)
             put_be16(sub_loca_bytes + i * 2, (uint16_t)(sub_loca[i] / 2));
-
         put_be16(sub_head + 50, 0);
     } else {
         sub_loca_len = (size_t)(sub_count + 1) * 4;
         sub_loca_bytes = xmalloc(sub_loca_len);
-
         for (uint32_t i = 0; i <= sub_count; i++)
             put_be32(sub_loca_bytes + i * 4, sub_loca[i]);
-
         put_be16(sub_head + 50, 1);
     }
-
     Str sub_cmap;
     str_init(&sub_cmap);
     build_cmap_subset(&sub_cmap, mapped, nused);
-
     unsigned char *sub_os2 = NULL;
     size_t sub_os2_len = 0;
-
     if (r.os2 && r.os2_len >= 2) {
         sub_os2 = xmalloc(r.os2_len);
         memcpy(sub_os2, r.os2, r.os2_len);
         sub_os2_len = r.os2_len;
     }
-
     unsigned char sub_post[32];
     memset(sub_post, 0, sizeof(sub_post));
     put_be32(sub_post + 0, 0x00030000);
-
     unsigned char *sub_name = NULL;
     size_t sub_name_len = 0;
-
     if (r.name && r.name_len >= 2) {
         sub_name = xmalloc(r.name_len);
         memcpy(sub_name, r.name, r.name_len);
         sub_name_len = r.name_len;
     }
-
     typedef struct {
         char tag[4];
         unsigned char *data;
@@ -2663,21 +2220,18 @@ static int cjk_build_subset(CjkFont *f,
         uint32_t checksum;
         size_t offset;
     } TableEntry;
-
     TableEntry tables[16];
     int tcount = 0;
-
-#define ADD_TABLE(t, d, l)                                             \
-    do {                                                               \
-        memcpy(tables[tcount].tag, t, 4);                              \
-        tables[tcount].data = (unsigned char *)(d);                    \
-        tables[tcount].len = (l);                                      \
-        tables[tcount].checksum =                                      \
-            ttf_table_checksum((const unsigned char *)(d), (l));       \
-        tables[tcount].offset = 0;                                     \
-        tcount++;                                                      \
+#define ADD_TABLE(t, d, l)                                              \
+    do {                                                                \
+        memcpy(tables[tcount].tag, t, 4);                               \
+        tables[tcount].data = (unsigned char *)(d);                     \
+        tables[tcount].len = (l);                                       \
+        tables[tcount].checksum =                                       \
+            ttf_table_checksum((const unsigned char *)(d), (l));        \
+        tables[tcount].offset = 0;                                      \
+        tcount++;                                                       \
     } while (0)
-
     ADD_TABLE("cmap", sub_cmap.data, sub_cmap.len);
     ADD_TABLE("glyf", sub_glyf.data, sub_glyf.len);
     ADD_TABLE("head", sub_head, r.head_len);
@@ -2685,24 +2239,17 @@ static int cjk_build_subset(CjkFont *f,
     ADD_TABLE("hmtx", sub_hmtx, sub_hmtx_len);
     ADD_TABLE("loca", sub_loca_bytes, sub_loca_len);
     ADD_TABLE("maxp", sub_maxp, r.maxp_len);
-
     if (sub_name)
         ADD_TABLE("name", sub_name, sub_name_len);
-
     if (sub_os2)
         ADD_TABLE("OS/2", sub_os2, sub_os2_len);
-
     ADD_TABLE("post", sub_post, 32);
-
     if (r.cvt && r.cvt_len > 0)
         ADD_TABLE("cvt ", r.cvt, r.cvt_len);
-
     if (r.fpgm && r.fpgm_len > 0)
         ADD_TABLE("fpgm", r.fpgm, r.fpgm_len);
-
     if (r.prep && r.prep_len > 0)
         ADD_TABLE("prep", r.prep, r.prep_len);
-
     for (int i = 0; i < tcount - 1; i++) {
         for (int j = i + 1; j < tcount; j++) {
             if (memcmp(tables[i].tag, tables[j].tag, 4) > 0) {
@@ -2712,76 +2259,57 @@ static int cjk_build_subset(CjkFont *f,
             }
         }
     }
-
     int ntables = tcount;
-
     uint16_t search_range = 1;
     uint16_t entry_selector = 0;
-
     while (search_range * 2 <= ntables) {
         search_range *= 2;
         entry_selector++;
     }
-
     search_range = (uint16_t)(search_range * 16);
     uint16_t range_shift = (uint16_t)(ntables * 16 - search_range);
-
     unsigned char sfnt_header[12];
     put_be32(sfnt_header + 0, 0x00010000);
     put_be16(sfnt_header + 4, (uint16_t)ntables);
     put_be16(sfnt_header + 6, search_range);
     put_be16(sfnt_header + 8, entry_selector);
     put_be16(sfnt_header + 10, range_shift);
-
     size_t dir_size = 12 + (size_t)ntables * 16;
     size_t offset = dir_size;
-
     for (int i = 0; i < tcount; i++) {
         tables[i].offset = offset;
         offset += tables[i].len;
         offset = (offset + 3) & ~(size_t)3;
     }
-
     Str ttf;
     str_init(&ttf);
-
     str_append(&ttf, (const char *)sfnt_header, 12);
-
     for (int i = 0; i < tcount; i++) {
         unsigned char rec[16];
-
         memcpy(rec, tables[i].tag, 4);
         put_be32(rec + 4, tables[i].checksum);
         put_be32(rec + 8, (uint32_t)tables[i].offset);
         put_be32(rec + 12, (uint32_t)tables[i].len);
-
         str_append(&ttf, (const char *)rec, 16);
     }
-
     for (int i = 0; i < tcount; i++) {
         str_append(&ttf, (const char *)tables[i].data, tables[i].len);
-
         size_t pad = (4 - (tables[i].len % 4)) % 4;
         for (size_t k = 0; k < pad; k++)
             str_append_char(&ttf, '\0');
     }
-
     uint32_t total_sum = 0;
     size_t ii = 0;
-
     while (ii + 4 <= ttf.len) {
         total_sum += ttf_be32((const unsigned char *)ttf.data + ii);
         ii += 4;
     }
-
     if (ii < ttf.len) {
         unsigned char buf[4] = {0};
         memcpy(buf, ttf.data + ii, ttf.len - ii);
         total_sum += ttf_be32(buf);
     }
-
     uint32_t check_adj = 0xB1B0AFBA - total_sum;
-
     for (int t = 0; t < tcount; t++) {
         if (memcmp(tables[t].tag, "head", 4) == 0) {
             unsigned char *p = (unsigned char *)ttf.data + tables[t].offset + 8;
@@ -2789,16 +2317,13 @@ static int cjk_build_subset(CjkFont *f,
             break;
         }
     }
-
     for (size_t i = 0; i < nused; i++) {
         used[i] = mapped[i];
         cjk_update_cmap_gid(f, mapped[i].cp, mapped[i].gid);
     }
-
     *out_data = (unsigned char *)ttf.data;
     *out_len = ttf.len;
     ttf.data = NULL;
-
     free(needed);
     free(old_to_new);
     free(mapped);
@@ -2813,40 +2338,25 @@ static int cjk_build_subset(CjkFont *f,
     str_free(&sub_glyf);
     str_free(&sub_cmap);
     ttf_raw_free(&r);
-
 #undef ADD_TABLE
-
     return 1;
 }
-
 static void cjk_write_fontfile(FILE *out,
                                long *offsets,
                                int obj,
                                const unsigned char *data,
                                size_t len)
 {
-    offsets[obj] = ftell(out);
-
-    fprintf(out,
-            "%d 0 obj\n"
-            "<< /Length %zu /Length1 %zu >>\n"
-            "stream\n",
-            obj,
-            len,
-            len);
-
-    fwrite(data, 1, len, out);
-    fprintf(out, "\nendstream\nendobj\n");
+    char extra[64];
+    snprintf(extra, sizeof(extra), " /Length1 %zu", len);
+    write_pdf_stream_obj(out, offsets, obj, extra, data, len);
 }
-
 static int cjk_scale_font_unit(int v)
 {
     if (g_cjk.units_per_em == 0)
         return v;
-
     return (int)((double)v * 1000.0 / (double)g_cjk.units_per_em + 0.5);
 }
-
 static void cjk_write_descriptor(FILE *out,
                                  long *offsets,
                                  int obj,
@@ -2854,14 +2364,10 @@ static void cjk_write_descriptor(FILE *out,
 {
     int ascent = cjk_scale_font_unit(g_cjk.ascent);
     int descent = cjk_scale_font_unit(g_cjk.descent);
-
     int bbox[4];
-
     for (int i = 0; i < 4; i++)
         bbox[i] = cjk_scale_font_unit(g_cjk.bbox[i]);
-
     offsets[obj] = ftell(out);
-
     fprintf(out,
             "%d 0 obj\n"
             "<< /Type /FontDescriptor\n"
@@ -2881,7 +2387,6 @@ static void cjk_write_descriptor(FILE *out,
             ascent, descent,
             fontfile_obj);
 }
-
 static void cjk_write_cidfont(FILE *out,
                               long *offsets,
                               int obj,
@@ -2890,7 +2395,6 @@ static void cjk_write_cidfont(FILE *out,
                               size_t nused)
 {
     offsets[obj] = ftell(out);
-
     fprintf(out,
             "%d 0 obj\n"
             "<< /Type /Font\n"
@@ -2904,31 +2408,23 @@ static void cjk_write_cidfont(FILE *out,
             obj,
             g_cjk.ps_name,
             desc_obj);
-
     size_t i = 0;
-
     while (i < nused) {
         uint16_t start_gid = used[i].gid;
-
         fprintf(out, " %u [", (unsigned)start_gid);
-
         size_t start = i;
-
         while (i < nused &&
                (uint32_t)used[i].gid == (uint32_t)start_gid + (i - start)) {
             int w = cjk_pdf_width_1000(&g_cjk, used[i].adv);
             fprintf(out, " %d", w);
             i++;
         }
-
         fprintf(out, " ]");
     }
-
     fprintf(out,
             " ] >>\n"
             "endobj\n");
 }
-
 static void cjk_write_tounicode(FILE *out,
                                 long *offsets,
                                 int obj,
@@ -2937,7 +2433,6 @@ static void cjk_write_tounicode(FILE *out,
 {
     Str cmap;
     str_init(&cmap);
-
     str_append_str(&cmap,
         "/CIDInit /ProcSet findresource begin\n"
         "12 dict begin\n"
@@ -2948,7 +2443,6 @@ static void cjk_write_tounicode(FILE *out,
         "1 begincodespacerange\n"
         "<0000> <FFFF>\n"
         "endcodespacerange\n");
-
     if (nused == 0) {
         str_append_str(&cmap,
             "1 beginbfchar\n"
@@ -2956,45 +2450,136 @@ static void cjk_write_tounicode(FILE *out,
             "endbfchar\n");
     } else {
         size_t i = 0;
-
         while (i < nused) {
             size_t chunk = nused - i;
-
             if (chunk > 100)
                 chunk = 100;
-
             str_appendf(&cmap, "%zu beginbfchar\n", chunk);
-
             for (size_t j = 0; j < chunk && i < nused; j++, i++) {
                 str_appendf(&cmap, "<%04X> <", used[i].gid);
                 append_utf16be_cp(&cmap, used[i].cp);
                 str_append_str(&cmap, ">\n");
             }
-
             str_append_str(&cmap, "endbfchar\n");
         }
     }
-
     str_append_str(&cmap,
         "endcmap\n"
         "CMapName currentdict /CMap defineresource pop\n"
         "end\n"
         "end\n");
-
-    offsets[obj] = ftell(out);
-
-    fprintf(out,
-            "%d 0 obj\n"
-            "<< /Length %zu >>\n"
-            "stream\n",
-            obj,
-            cmap.len);
-
-    fwrite(cmap.data, 1, cmap.len, out);
-    fprintf(out, "endstream\nendobj\n");
-
+    write_pdf_stream_obj(out, offsets, obj, NULL, cmap.data, cmap.len);
     str_free(&cmap);
 }
+
+/* ========================================================================
+   URL detection (external links)
+   ======================================================================== */
+static int is_url_char(unsigned char c)
+{
+    if (isalnum(c))
+        return 1;
+    switch (c) {
+    /* unreserved */
+    case '-': case '.': case '_': case '~':
+    /* gen-delims */
+    case ':': case '/': case '?': case '#':
+    case '[': case ']': case '@':
+    /* sub-delims (+ percent) */
+    case '!': case '$': case '&': case '\'':
+    case '(': case ')': case '*': case '+':
+    case ',': case ';': case '=': case '%':
+        return 1;
+    }
+    return 0;
+}
+
+static double courier_width(const char *s)
+{
+    return (double)strlen(s) * CHAR_WIDTH;
+}
+
+/* Strips common trailing punctuation from a candidate URL. */
+static size_t trim_url_end(const char *s, size_t start, size_t end)
+{
+    while (end > start) {
+        unsigned char c = (unsigned char)s[end - 1];
+        if (c == '.' || c == ',' || c == ';' || c == ':' ||
+            c == '!' || c == '?' || c == '\'' || c == '"') {
+            end--;
+            continue;
+        }
+        if (c == ')') {
+            int opens = 0, closes = 0;
+            for (size_t k = start; k < end; k++) {
+                if (s[k] == '(') opens++;
+                else if (s[k] == ')') closes++;
+            }
+            if (closes > opens) {
+                end--;
+                continue;
+            }
+        }
+        break;
+    }
+    return end;
+}
+
+/*
+ * Scans s[from..len) for the next URL (http://, https://, ftp:// or
+ * www.something). Returns the end position of the match, or `len`
+ * when nothing is found (in that case *out_len is 0).
+ */
+static size_t find_next_url(const char *s, size_t len, size_t from,
+                            size_t *out_start, size_t *out_len)
+{
+    for (size_t i = from; i < len; i++) {
+        size_t plen = 0;
+        if (i + 8 <= len && v17_str_ncasecmp(s + i, "https://", 8))
+            plen = 8;
+        else if (i + 7 <= len && v17_str_ncasecmp(s + i, "http://", 7))
+            plen = 7;
+        else if (i + 6 <= len && v17_str_ncasecmp(s + i, "ftp://", 6))
+            plen = 6;
+        else if (i + 4 <= len && v17_str_ncasecmp(s + i, "www.", 4))
+            plen = 4;
+        if (plen == 0)
+            continue;
+        /* avoid matches inside a word ("xhttp://", "awww.") */
+        if (i > 0 && isalnum((unsigned char)s[i - 1]))
+            continue;
+        size_t j = i + plen;
+        while (j < len && is_url_char((unsigned char)s[j]))
+            j++;
+        size_t end = trim_url_end(s, i, j);
+        if (end - i < plen + 1)
+            continue;            /* require something after the scheme */
+        if (plen == 4) {
+            int has_dot = 0;
+            for (size_t k = i + 4; k < end; k++)
+                if (s[k] == '.')
+                    has_dot = 1;
+            if (!has_dot)
+                continue;        /* bare "www." without a domain */
+        }
+        *out_start = i;
+        *out_len = end - i;
+        return end;
+    }
+    *out_start = len;
+    *out_len = 0;
+    return len;
+}
+
+static double text_width_by_font(const char *s, FontKind fk, int trim_trailing)
+{
+    if (fk == FONT_COURIER)
+        return courier_width(s);
+    if (fk == FONT_CJK)
+        return cjk_text_width_pt(s, FONT_SIZE, trim_trailing);
+    return v17_text_width_pt(s, fk, FONT_SIZE, trim_trailing);
+}
+
 /* ========================================================================
 Spartan Font Resolver
 ======================================================================== */
@@ -3003,20 +2588,16 @@ static char *resolve_font_path(const char *name)
     if (strchr(name, '/') || access(name, F_OK) == 0) {
         return xstrdup(name);
     }
-
     const char *home = getenv("HOME");
     char buffer[2048];
-
     if (home) {
         snprintf(buffer, sizeof(buffer), "%s/.local/share/fonts/%s", home, name);
         if (access(buffer, F_OK) == 0)
             return xstrdup(buffer);
-
         snprintf(buffer, sizeof(buffer), "%s/.fonts/%s", home, name);
         if (access(buffer, F_OK) == 0)
             return xstrdup(buffer);
     }
-
     static const char *sys_dirs[] = {
         "/usr/local/share/fonts",
         "/usr/share/fonts",
@@ -3028,40 +2609,73 @@ static char *resolve_font_path(const char *name)
         "/usr/share/fonts/opentype/noto",
         NULL
     };
-
     for (int i = 0; sys_dirs[i] != NULL; i++) {
         snprintf(buffer, sizeof(buffer), "%s/%s", sys_dirs[i], name);
         if (access(buffer, F_OK) == 0)
             return xstrdup(buffer);
     }
-
     return xstrdup(name);
 }
-
+/* ========================================================================
+Help / version
+======================================================================== */
+static void print_usage(FILE *fh, const char *prog)
+{
+    fprintf(fh,
+        "txt2pdf " TXT2PDF_VERSION " - minimal TXT to PDF converter (pure C)\n"
+        "Platform: " TXT2PDF_PLATFORM "\n"
+        "\n"
+        "Usage: %s [options] input.txt output.pdf\n"
+        "\n"
+        "Font options:\n"
+        "  --sans | --serif | --mono   Base14 font (Helvetica/Times/Courier [default])\n"
+        "  --font FILE.ttf             Embed a TrueType font (Unicode/CJK mode)\n"
+        "\n"
+        "Compression:\n"
+        "  --compress                  Compress PDF streams with zlib (default: ON)\n"
+        "  --no-compress               Disable stream compression\n"
+        "  --level N                   Level 1-12 (default 12)\n"
+        "\n"
+        "Other:\n"
+        "  --debug                     Verbose diagnostics\n"
+        "  -h, --help                  Show this help\n"
+        "  -V, --version               Show version\n"
+        "\n"
+        "Examples:\n"
+        "  %s readme.txt readme.pdf\n"
+        "  %s --compress --level 12 readme.txt readme.pdf\n"
+        "  %s --font NotoSansJP-Regular.ttf doc.txt doc.pdf\n",
+        prog, prog, prog, prog);
+}
+static void print_version(void)
+{
+    printf("txt2pdf %s\n", TXT2PDF_VERSION);
+    printf("Platform: %s\n", TXT2PDF_PLATFORM);
+    printf("Simple TXT to PDF converter in pure C (PDF 1.4).\n");
+    printf("Stream compression: libdeflate (zlib / FlateDecode).\n");
+    printf("License: GNU GPL v3+  |  Source: https://github.com/johna124\n");
+}
 /* ========================================================================
 main()
 ======================================================================== */
-
 int main(int argc, char **argv)
 {
     setlocale(LC_NUMERIC, "C");
-
     int debug = 0;
     FontKind font_kind = FONT_COURIER;
-
     const char *input = NULL;
     const char *output = NULL;
     const char *font_path = NULL;
 
-    if (argc == 2 &&
-        (strcmp(argv[1], "--help") == 0 || strcmp(argv[1], "-h") == 0)) {
-        printf("Usage: %s [--debug] [--sans|--serif|--mono] [--font TTF] input.txt output.pdf\n",
-               argv[0]);
-        return 0;
-    }
-
     for (int i = 1; i < argc; i++) {
-        if (strcmp(argv[i], "--debug") == 0) {
+        if (strcmp(argv[i], "--help") == 0 || strcmp(argv[i], "-h") == 0) {
+            print_usage(stdout, argv[0]);
+            return 0;
+        } else if (strcmp(argv[i], "--version") == 0 ||
+                   strcmp(argv[i], "-V") == 0) {
+            print_version();
+            return 0;
+        } else if (strcmp(argv[i], "--debug") == 0) {
             debug = 1;
         } else if (strcmp(argv[i], "--sans") == 0) {
             font_kind = FONT_HELVETICA;
@@ -3070,36 +2684,66 @@ int main(int argc, char **argv)
         } else if (strcmp(argv[i], "--mono") == 0) {
             font_kind = FONT_COURIER;
         } else if (strcmp(argv[i], "--font") == 0) {
-            if (i + 1 < argc) {
-                font_path = argv[++i];
-            } else {
+            if (i + 1 >= argc) {
                 fprintf(stderr, "--font requires a TTF file\n");
                 return 1;
             }
+            font_path = argv[++i];
+        } else if (strcmp(argv[i], "--no-compress") == 0) {
+            g_compress = 0;
+        } else if (strcmp(argv[i], "--level") == 0) {
+        } else if (strcmp(argv[i], "--compress") == 0) {
+            g_compress = 1;
+        } else if (strcmp(argv[i], "--level") == 0) {
+            if (i + 1 >= argc) {
+                fprintf(stderr, "--level requires a number between 1 and 12\n");
+                return 1;
+            }
+            g_level = atoi(argv[++i]);
+            if (g_level < 1 || g_level > 12) {
+                fprintf(stderr, "Invalid compression level %d (use 1-12)\n",
+                        g_level);
+                return 1;
+            }
+            g_compress = 1;
+        } else if (argv[i][0] == '-' && argv[i][1] != '\0') {
+            fprintf(stderr, "Unknown option: %s\nTry '%s --help'\n",
+                    argv[i], argv[0]);
+            return 1;
         } else if (!input) {
             input = argv[i];
         } else if (!output) {
             output = argv[i];
+        } else {
+            fprintf(stderr, "Too many arguments\nTry '%s --help'\n", argv[0]);
+            return 1;
         }
     }
 
     if (!input || !output) {
         fprintf(stderr,
-                "Usage: %s [--debug] [--sans|--serif|--mono] [--font TTF] input.txt output.pdf\n",
+                "Usage: %s [options] input.txt output.pdf   (see --help)\n",
                 argv[0]);
         return 1;
     }
 
+    if (g_compress) {
+        g_compressor = libdeflate_alloc_compressor(g_level);
+        if (!g_compressor) {
+            fprintf(stderr,
+                    "libdeflate: cannot create compressor (level %d)\n",
+                    g_level);
+            return 1;
+        }
+    }
+
     size_t len = 0;
     char *data = read_file(input, &len);
-
     if (!data) {
         fprintf(stderr, "Cannot read '%s'\n", input);
         return 1;
     }
-
     g_is_utf8 = detect_if_utf8(data, len);
-
     if (font_path) {
         char *resolved_font = resolve_font_path(font_path);
         if (!cjk_load_ttf(resolved_font, &g_cjk)) {
@@ -3117,127 +2761,97 @@ int main(int argc, char **argv)
     if (debug) {
         fprintf(stderr, "[debug] Detected encoding: %s\n",
                 g_is_utf8 ? "UTF-8" : "Latin-1/ISO-8859-1");
-
         fprintf(stderr, "[debug] Font mode: %s\n",
                 font_kind == FONT_CJK ? "CJK TTF" :
                 font_kind == FONT_HELVETICA ? "Helvetica" :
                 font_kind == FONT_TIMES ? "Times-Roman" : "Courier");
+        fprintf(stderr, "[debug] Compression: %s\n",
+                g_compress ? "zlib (libdeflate)" : "off");
+        if (g_compress)
+            fprintf(stderr, "[debug] Compression level: %d\n", g_level);
     }
-
     int nlines = 0;
     char **lines = split_lines(data, len, &nlines);
-
     free(data);
     data = NULL;
-
     int map_n = nlines > 0 ? nlines : 1;
-
     int *heading_map = xmalloc(sizeof(int) * (size_t)map_n);
     int *candidate_map = xmalloc(sizeof(int) * (size_t)map_n);
     int *toc_map = xmalloc(sizeof(int) * (size_t)map_n);
     int *image_map = xmalloc(sizeof(int) * (size_t)map_n);
-
     for (int i = 0; i < map_n; i++) {
         heading_map[i] = -1;
         candidate_map[i] = -1;
         toc_map[i] = 0;
         image_map[i] = -1;
     }
-
     Section *sections = NULL;
     size_t nsections = 0, capsections = 0;
-
     Candidate *cands = NULL;
     size_t ncands = 0, capcands = 0;
-
+    size_t nurls = 0;
     VisLine *vis = NULL;
     size_t nvis = 0, capvis = 0;
-
     Image *images = NULL;
     size_t nimages = 0, capimages = 0;
-
     ImagePlace *places = NULL;
     size_t nplaces = 0, capplaces = 0;
-
     int *outline_idx = NULL;
     long *offsets = NULL;
     FILE *out = NULL;
     int rc = 0;
     int toc_line_count = 0;
-
     UsedGlyph *used = NULL;
     size_t nused = 0, capused = 0;
-
     unsigned char *subset_data = NULL;
     size_t subset_len = 0;
-
     Str esc;
     esc.data = NULL;
     esc.len = 0;
     esc.cap = 0;
-
     double max_width = PAGE_WIDTH - 2.0 * MARGIN;
     int max_chars = (int)(max_width / CHAR_WIDTH);
-
     if (max_chars < 1)
         max_chars = 1;
-
     int lines_per_page = (int)((PAGE_HEIGHT - 2.0 * MARGIN) / LEADING);
-
     if (lines_per_page < 1)
         lines_per_page = 1;
-
     double max_image_h = (double)lines_per_page * LEADING;
-
     /* Detect TOC */
     for (int i = 0; i < nlines; i++) {
         if (toc_map[i])
             continue;
-
         char *trimmed = trim_dup(lines[i]);
         int is_toc_title = (strstr(trimmed, "[TOC]") != NULL);
         free(trimmed);
-
         if (!is_toc_title)
             continue;
-
         int j = i + 1;
-
         while (j < nlines && line_is_blank(lines[j]))
             j++;
-
         if (j < nlines && is_separator(lines[j])) {
             int k = j + 1;
-
             while (k < nlines && !is_separator(lines[k]))
                 k++;
-
             int end = (k < nlines) ? k : (nlines - 1);
-
             for (int x = i; x <= end; x++) {
                 toc_map[x] = 1;
                 toc_line_count++;
             }
-
             i = end;
         }
     }
-
     /* Detect sections */
     for (int i = 0; i < nlines; i++) {
         char *id = NULL, *title = NULL;
-
         if (!parse_section_line_dyn(lines[i], &id, &title))
             continue;
-
         int valid = is_upper_title(title);
-
         if (valid && toc_map[i]) {
             if (debug)
                 fprintf(stderr, "[debug] SKIP line %d: heading inside TOC\n", i + 1);
             valid = 0;
         }
-
         if (valid &&
             (!nearby_prev_is_separator(lines, nlines, i) ||
              !nearby_next_is_separator(lines, nlines, i))) {
@@ -3247,7 +2861,6 @@ int main(int argc, char **argv)
                         i + 1);
             valid = 0;
         }
-
         if (valid) {
             char *full = trim_dup(lines[i]);
             int idx = add_section(&sections, &nsections, &capsections,
@@ -3255,64 +2868,48 @@ int main(int argc, char **argv)
             heading_map[i] = idx;
             free(full);
         }
-
         free(id);
         free(title);
     }
-
     /* Detect TOC links */
     for (int i = 0; i < nlines; i++) {
         if (!toc_map[i])
             continue;
-
         if (candidate_map[i] != -1)
             continue;
-
         char *id = NULL, *title = NULL;
-
         if (!parse_section_line_dyn(lines[i], &id, &title))
             continue;
-
         int target = find_section_by_id(sections, nsections, id);
-
         if (target < 0) {
             char *norm = normalize_alnum_upper_dup(title);
             target = find_section_by_title_norm(sections, nsections, norm);
             free(norm);
         }
-
         if (target >= 0) {
             int idx = add_candidate(&cands, &ncands, &capcands, i, target);
-
             if (idx >= 0)
                 candidate_map[i] = idx;
         }
-
         free(id);
         free(title);
     }
-
     /* Detect images */
     for (int i = 0; i < nlines; i++) {
         char *trimmed = trim_dup(lines[i]);
         char *imgpath = NULL;
-
         if (v17_parse_img_line(trimmed, &imgpath)) {
             Image img;
             memset(&img, 0, sizeof(img));
             img.path = xstrdup(imgpath);
-
             int ok = 0;
-
             if (v17_has_jpeg_extension(imgpath))
                 ok = v17_load_jpeg_passthrough(imgpath, &img);
             else if (v17_has_png_extension(imgpath))
                 ok = v17_load_png_passthrough(imgpath, &img);
-
             if (ok) {
                 v17_compute_image_display_size(&img, max_image_h);
                 image_map[i] = v17_add_image(&images, &nimages, &capimages, &img);
-
                 if (debug) {
                     fprintf(stderr,
                             "[debug] IMAGE line %d path '%s' %dx%d disp %.2fx%.2f\n",
@@ -3322,65 +2919,47 @@ int main(int argc, char **argv)
             } else {
                 if (debug)
                     fprintf(stderr, "[debug] Cannot load image: '%s'\n", imgpath);
-
                 free(img.path);
             }
-
             free(imgpath);
         }
-
         free(trimmed);
     }
-
     /* Page layout */
     int current_page = 1;
     int line_on_page = 0;
-
     for (int i = 0; i < nlines; i++) {
         if (image_map[i] >= 0) {
             Image *img = &images[image_map[i]];
-
             int needed = (int)(img->disp_h / LEADING);
-
             if ((double)needed * LEADING < img->disp_h)
                 needed++;
-
             if (needed < 1)
                 needed = 1;
-
             if (needed > lines_per_page)
                 needed = lines_per_page;
-
             if (line_on_page + needed > lines_per_page) {
                 current_page++;
                 line_on_page = 0;
             }
-
             double top = PAGE_HEIGHT - MARGIN - (double)line_on_page * LEADING;
             double y = top - img->disp_h;
-
             if (y < MARGIN)
                 y = MARGIN;
-
             v17_add_image_placement(&places, &nplaces, &capplaces,
                                     current_page, image_map[i],
                                     MARGIN, y, img->disp_w, img->disp_h);
-
             line_on_page += needed;
             continue;
         }
-
         const char *s = lines[i];
         size_t slen = strlen(s);
         size_t off = 0;
-
         int first = 1;
         int emitted = 0;
-
         while (off < slen || !emitted) {
             char *buf = NULL;
             size_t consume = 0;
-
             if (off >= slen) {
                 buf = xstrdup("");
                 consume = 0;
@@ -3392,43 +2971,33 @@ int main(int argc, char **argv)
                 v17_next_visual_chunk(s, off, slen, max_width, font_kind,
                                       &buf, &consume);
             }
-
             if (consume == 0)
                 consume = 1;
-
             if (line_on_page >= lines_per_page) {
                 current_page++;
                 line_on_page = 0;
             }
-
             double y = PAGE_HEIGHT - MARGIN - (double)line_on_page * LEADING;
-
             if (nvis == capvis) {
                 capvis = capvis ? capvis * 2 : 256;
                 vis = xrealloc(vis, capvis * sizeof(VisLine));
             }
-
             vis[nvis].page = current_page;
             vis[nvis].orig_line = i;
             vis[nvis].y = y;
             vis[nvis].text = buf;
             nvis++;
-
             if (first) {
                 if (heading_map[i] >= 0) {
                     sections[heading_map[i]].page = current_page;
                     sections[heading_map[i]].y = y;
                 }
-
                 if (candidate_map[i] >= 0) {
                     Candidate *c = &cands[candidate_map[i]];
-
                     c->page = current_page;
                     c->y = y;
-
                     free(c->text);
                     c->text = xstrdup(buf);
-
                     if (font_kind == FONT_COURIER)
                         c->width = visible_width(buf);
                     else if (font_kind == FONT_CJK)
@@ -3436,123 +3005,92 @@ int main(int argc, char **argv)
                     else
                         c->width = v17_text_width_pt(buf, font_kind, FONT_SIZE, 1);
                 }
-
                 first = 0;
             }
-
             off += consume;
             emitted = 1;
             line_on_page++;
         }
     }
-
     int total_pages = current_page;
-
     if (total_pages < 1)
         total_pages = 1;
-
     /* Outline index */
     size_t outline_count = 0;
-
     if (nsections > 0) {
         outline_idx = xmalloc(sizeof(int) * nsections);
-
         for (size_t i = 0; i < nsections; i++) {
             if (sections[i].page > 0)
                 outline_idx[outline_count++] = (int)i;
         }
     }
-
     int K = (int)outline_count;
-
     if (debug) {
         fprintf(stderr, "[debug] Lines marked as TOC: %d\n", toc_line_count);
         fprintf(stderr, "[debug] Sections detected: %zu\n", nsections);
         fprintf(stderr, "[debug] Images detected: %zu\n", nimages);
         fprintf(stderr, "[debug] Image placements: %zu\n", nplaces);
     }
-
     /* Collect CJK glyphs and build subset */
     if (font_kind == FONT_CJK) {
         for (size_t i = 0; i < nvis; i++) {
             if (vis[i].text)
                 collect_used_string(vis[i].text, &used, &nused, &capused);
         }
-
         for (size_t i = 0; i < nsections; i++) {
             if (sections[i].full)
                 collect_used_string(sections[i].full, &used, &nused, &capused);
         }
-
         nused = used_make_unique(used, nused);
-
         if (!cjk_build_subset(&g_cjk, used, nused, &subset_data, &subset_len)) {
             fprintf(stderr,
                     "Warning: TTF subsetting failed, embedding full font.\n");
             subset_data = NULL;
             subset_len = 0;
         }
-
         qsort(used, nused, sizeof(UsedGlyph), used_cmp_gid);
     }
-
     const char *basefont = "Courier";
-
     if (font_kind == FONT_HELVETICA)
         basefont = "Helvetica";
     else if (font_kind == FONT_TIMES)
         basefont = "Times-Roman";
     else if (font_kind == FONT_CJK)
         basefont = g_cjk.ps_name;
-
     /* Generate PDF */
     out = fopen(output, "wb");
-
     if (!out) {
         fprintf(stderr, "Cannot write '%s'\n", output);
         rc = 1;
         goto cleanup;
     }
-
     int first_page_obj = 5;
     int first_content_obj = first_page_obj + total_pages;
     int first_outline_obj = first_content_obj + total_pages;
     int first_image_obj = first_outline_obj + K;
-
     int cjk_cid_obj = 0;
     int cjk_desc_obj = 0;
     int cjk_file_obj = 0;
     int cjk_tounicode_obj = 0;
-
     int total_objs = 4 + 2 * total_pages + K + (int)nimages;
-
     if (font_kind == FONT_CJK) {
         int first_cjk_obj = first_image_obj + (int)nimages;
-
         cjk_cid_obj = first_cjk_obj;
         cjk_desc_obj = first_cjk_obj + 1;
         cjk_file_obj = first_cjk_obj + 2;
         cjk_tounicode_obj = first_cjk_obj + 3;
-
         total_objs += 4;
     }
-
     for (size_t i = 0; i < nimages; i++)
         images[i].obj = first_image_obj + (int)i;
-
     offsets = xmalloc(sizeof(long) * (size_t)(total_objs + 1));
-
     fprintf(out, "%%PDF-1.4\n");
-
     static const unsigned char bincomment[] = {
         '%', 0xE2, 0xE3, 0xCF, 0xD3, '\n'
     };
-
     fwrite(bincomment, 1, sizeof(bincomment), out);
-
     /* Catalog */
     offsets[1] = ftell(out);
-
     if (K > 0) {
         fprintf(out,
                 "1 0 obj\n"
@@ -3564,10 +3102,8 @@ int main(int argc, char **argv)
                 "<< /Type /Catalog /Pages 3 0 R >>\n"
                 "endobj\n");
     }
-
     /* Outlines root */
     offsets[2] = ftell(out);
-
     if (K > 0) {
         fprintf(out,
                 "2 0 obj\n"
@@ -3582,34 +3118,29 @@ int main(int argc, char **argv)
                 "<< /Type /Outlines /Count 0 >>\n"
                 "endobj\n");
     }
-
     /* Pages tree */
     offsets[3] = ftell(out);
-
     Str kids;
     str_init(&kids);
     str_append_str(&kids, "[");
 
+
     for (int p = 1; p <= total_pages; p++) {
         if (p > 1)
             str_append_char(&kids, ' ');
-
         str_appendf(&kids, "%d 0 R", first_page_obj + p - 1);
     }
-
     str_append_str(&kids, "]");
-
     fprintf(out,
             "3 0 obj\n"
             "<< /Type /Pages /Kids %s /Count %d >>\n"
             "endobj\n",
             kids.data, total_pages);
-
     str_free(&kids);
+
 
     /* Font */
     offsets[4] = ftell(out);
-
     if (font_kind == FONT_CJK) {
         fprintf(out,
                 "4 0 obj\n"
@@ -3630,44 +3161,37 @@ int main(int argc, char **argv)
                 "endobj\n",
                 basefont);
     }
-
     str_init(&esc);
 
-    /* Page objects */
+
+        /* Page objects */
     for (int p = 1; p <= total_pages; p++) {
         int page_obj = first_page_obj + p - 1;
         int content_obj = first_content_obj + p - 1;
-
         Str annots;
         str_init(&annots);
         str_append_str(&annots, "[");
-
         int has_annots = 0;
 
+        /* Internal TOC links */
         for (size_t ci = 0; ci < ncands; ci++) {
             Candidate *c = &cands[ci];
-
             if (c->page == p &&
                 c->target >= 0 &&
                 c->text &&
                 c->width > 1.0) {
                 Section *s = &sections[c->target];
-
                 if (s->page > 0) {
                     int target_page_obj = first_page_obj + s->page - 1;
                     double dest_y = s->y + 10.0;
-
                     if (dest_y > PAGE_HEIGHT - MARGIN)
                         dest_y = PAGE_HEIGHT - MARGIN;
-
                     double x1 = MARGIN - 1.0;
                     double y1 = c->y - 2.0;
                     double x2 = MARGIN + c->width + 1.0;
                     double y2 = c->y + FONT_SIZE;
-
                     if (has_annots)
                         str_append_char(&annots, ' ');
-
                     str_appendf(&annots,
                                 "<< /Type /Annot /Subtype /Link "
                                 "/Rect [%.2f %.2f %.2f %.2f] "
@@ -3676,71 +3200,94 @@ int main(int argc, char **argv)
                                 x1, y1, x2, y2,
                                 target_page_obj,
                                 MARGIN, dest_y);
-
                     has_annots = 1;
                 }
             }
         }
 
-        str_append_str(&annots, "]");
 
+                /* External URL links */
+        for (size_t vi = 0; vi < nvis; vi++) {
+            if (vis[vi].page != p || !vis[vi].text || !vis[vi].text[0])
+                continue;
+            const char *t = vis[vi].text;
+            size_t tlen = strlen(t);
+            size_t pos = 0;
+            while (pos < tlen) {
+                size_t us = 0, ul = 0;
+                size_t next = find_next_url(t, tlen, pos, &us, &ul);
+                if (ul == 0)
+                    break;
+                char *pre = xstrndup(t, us);
+                double pre_w = text_width_by_font(pre, font_kind, 0);
+                free(pre);
+                char *urltxt = xstrndup(t + us, ul);
+                double url_w = text_width_by_font(urltxt, font_kind, 1);
+                free(urltxt);
+                Str uri;
+                str_init(&uri);
+                if (ul >= 4 && v17_str_ncasecmp(t + us, "www.", 4))
+                    str_append_str(&uri, "https://");
+                for (size_t k = us; k < us + ul; k++)
+                    v17_append_escaped_char(&uri, (unsigned char)t[k]);
+                if (has_annots)
+                    str_append_char(&annots, ' ');
+                str_appendf(&annots,
+                            "<< /Type /Annot /Subtype /Link "
+                            "/Rect [%.2f %.2f %.2f %.2f] "
+                            "/Border [0 0 0] "
+                            "/A << /S /URI /URI (%s) >> >>",
+                            MARGIN + pre_w, vis[vi].y - 2.0,
+                            MARGIN + pre_w + url_w, vis[vi].y + FONT_SIZE,
+                            uri.data ? uri.data : "");
+                str_free(&uri);
+                has_annots = 1;
+                nurls++;
+                pos = next;
+            }
+        }
+
+        str_append_str(&annots, "]");
         Str xobjs;
         str_init(&xobjs);
-
         int has_xobjs = 0;
-
         for (size_t pi = 0; pi < nplaces; pi++) {
             ImagePlace *pl = &places[pi];
-
             if (pl->page != p)
                 continue;
-
             if (has_xobjs)
                 str_append_char(&xobjs, ' ');
-
             str_appendf(&xobjs, "/Im%d %d 0 R",
                         pl->image_idx + 1,
                         images[pl->image_idx].obj);
-
             has_xobjs = 1;
         }
-
         offsets[page_obj] = ftell(out);
-
         fprintf(out,
                 "%d 0 obj\n"
                 "<< /Type /Page /Parent 3 0 R "
                 "/MediaBox [0 0 %.0f %.0f] "
                 "/Resources << /Font << /F1 4 0 R >>",
                 page_obj, PAGE_WIDTH, PAGE_HEIGHT);
-
         if (has_xobjs)
             fprintf(out, " /XObject << %s >>", xobjs.data);
-
         fprintf(out, " >> /Contents %d 0 R", content_obj);
-
         if (has_annots)
             fprintf(out, " /Annots %s", annots.data);
-
         fprintf(out, " >>\nendobj\n");
-
         str_free(&annots);
         str_free(&xobjs);
     }
 
-    /* Content streams */
+            /* Content streams */
     for (int p = 1; p <= total_pages; p++) {
         int content_obj = first_content_obj + p - 1;
-
         Str content;
         str_init(&content);
-
         for (size_t pi = 0; pi < nplaces; pi++) {
             ImagePlace *pl = &places[pi];
-
             if (pl->page != p)
                 continue;
-
             str_appendf(&content,
                         "q\n"
                         "%.2f 0 0 %.2f %.2f %.2f cm\n"
@@ -3749,42 +3296,68 @@ int main(int argc, char **argv)
                         pl->w, pl->h, pl->x, pl->y,
                         pl->image_idx + 1);
         }
-
         for (size_t vi = 0; vi < nvis; vi++) {
             if (vis[vi].page == p &&
                 vis[vi].text &&
                 vis[vi].text[0]) {
                 if (font_kind == FONT_CJK) {
                     cjk_escape_hex(vis[vi].text, &esc);
-
                     str_appendf(&content,
                                 "BT /F1 %.1f Tf %.2f %.2f Td %s Tj ET\n",
                                 FONT_SIZE, MARGIN, vis[vi].y,
                                 esc.data ? esc.data : "<>");
                 } else {
-                    v17_pdf_escape(vis[vi].text, &esc);
-
-                    str_appendf(&content,
-                                "BT /F1 %.1f Tf %.2f %.2f Td (%s) Tj ET\n",
-                                FONT_SIZE, MARGIN, vis[vi].y,
-                                esc.data ? esc.data : "");
+                    /* Detectar y dibujar URLs en azul con subrayado */
+                    const char *t = vis[vi].text;
+                    size_t tlen = strlen(t);
+                    size_t pos = 0;
+                    double x_pos = MARGIN;
+                    
+                    while (pos < tlen) {
+                        size_t us = 0, ul = 0;
+                        size_t next = find_next_url(t, tlen, pos, &us, &ul);
+                        
+                        /* Dibujar texto antes de la URL (si hay) */
+                        if (us > pos) {
+                            char *pre = xstrndup(t + pos, us - pos);
+                            v17_pdf_escape(pre, &esc);
+                            str_appendf(&content,
+                                        "BT /F1 %.1f Tf 0 0 0 rg %.2f %.2f Td (%s) Tj ET\n",
+                                        FONT_SIZE, x_pos, vis[vi].y,
+                                        esc.data ? esc.data : "");
+                            x_pos += text_width_by_font(pre, font_kind, 0);
+                            free(pre);
+                        }
+                        
+                        /* Dibujar URL en azul con subrayado */
+                        if (ul > 0) {
+                            char *urltxt = xstrndup(t + us, ul);
+                            v17_pdf_escape(urltxt, &esc);
+                            double url_w = text_width_by_font(urltxt, font_kind, 1);
+                            
+                            /* Texto azul */
+                            str_appendf(&content,
+                                        "BT /F1 %.1f Tf 0 0 1 rg %.2f %.2f Td (%s) Tj ET\n",
+                                        FONT_SIZE, x_pos, vis[vi].y,
+                                        esc.data ? esc.data : "");
+                            
+                            /* Línea azul debajo */
+                            str_appendf(&content,
+                                        "q 0 0 1 RG 0.5 w %.2f %.2f m %.2f %.2f l S Q\n",
+                                        x_pos, vis[vi].y - 1.0,
+                                        x_pos + url_w, vis[vi].y - 1.0);
+                            
+                            x_pos += url_w;
+                            free(urltxt);
+                        }
+                        
+                        pos = next;
+                    }
                 }
             }
         }
-
-        offsets[content_obj] = ftell(out);
-
-        fprintf(out,
-                "%d 0 obj\n"
-                "<< /Length %zu >>\n"
-                "stream\n",
-                content_obj, content.len);
-
-        if (content.len > 0)
-            fwrite(content.data, 1, content.len, out);
-
-        fprintf(out, "endstream\nendobj\n");
-
+        write_pdf_stream_obj(out, offsets, content_obj, NULL,
+                             content.data ? content.data : "", content.len);
         str_free(&content);
     }
 
@@ -3792,20 +3365,14 @@ int main(int argc, char **argv)
     for (int j = 0; j < K; j++) {
         int si = outline_idx[j];
         Section *s = &sections[si];
-
         int obj = first_outline_obj + j;
         int page_obj = first_page_obj + s->page - 1;
-
         double dest_y = s->y + 10.0;
-
         if (dest_y > PAGE_HEIGHT - MARGIN)
             dest_y = PAGE_HEIGHT - MARGIN;
-
         offsets[obj] = ftell(out);
-
         if (font_kind == FONT_CJK) {
             pdf_escape_utf16be_hex(s->full, &esc);
-
             fprintf(out,
                     "%d 0 obj\n"
                     "<< /Title %s /Parent 2 0 R",
@@ -3813,40 +3380,31 @@ int main(int argc, char **argv)
                     esc.data ? esc.data : "<FEFF>");
         } else {
             v17_pdf_escape(s->full, &esc);
-
             fprintf(out,
                     "%d 0 obj\n"
                     "<< /Title (%s) /Parent 2 0 R",
                     obj,
                     esc.data ? esc.data : "");
         }
-
         if (j > 0)
             fprintf(out, " /Prev %d 0 R", obj - 1);
-
         if (j < K - 1)
             fprintf(out, " /Next %d 0 R", obj + 1);
-
         fprintf(out,
                 " /Dest [%d 0 R /XYZ %.2f %.2f null] >>\n"
                 "endobj\n",
                 page_obj, MARGIN, dest_y);
     }
-
     /* Image XObjects */
     for (size_t ii = 0; ii < nimages; ii++) {
         Image *img = &images[ii];
-
         offsets[img->obj] = ftell(out);
-
         if (img->kind == IMG_JPEG) {
             const char *cs = "/DeviceRGB";
-
             if (img->components == 1)
                 cs = "/DeviceGray";
             else if (img->components == 4)
                 cs = "/DeviceCMYK";
-
             fprintf(out,
                     "%d 0 obj\n"
                     "<< /Type /XObject /Subtype /Image\n"
@@ -3861,28 +3419,23 @@ int main(int argc, char **argv)
                     img->height,
                     cs,
                     img->data_len);
-
             fwrite(img->data, 1, img->data_len, out);
             fwrite("\nendstream\nendobj\n", 1,
                    sizeof("\nendstream\nendobj\n") - 1, out);
         } else if (img->kind == IMG_PNG_PASSTHROUGH) {
             Str cs;
             str_init(&cs);
-
             if (img->indexed && img->palette_len >= 3) {
                 str_appendf(&cs, "[/Indexed /DeviceRGB %zu <",
                             img->palette_len / 3 - 1);
-
                 for (size_t k = 0; k < img->palette_len; k++)
                     str_appendf(&cs, "%02X", img->palette[k]);
-
                 str_append_str(&cs, ">]");
             } else if (img->colors == 1) {
                 str_append_str(&cs, "/DeviceGray");
             } else {
                 str_append_str(&cs, "/DeviceRGB");
             }
-
             fprintf(out,
                     "%d 0 obj\n"
                     "<< /Type /XObject /Subtype /Image\n"
@@ -3900,66 +3453,58 @@ int main(int argc, char **argv)
                     img->colors,
                     img->width,
                     img->data_len);
-
             fwrite(img->data, 1, img->data_len, out);
             fwrite("\nendstream\nendobj\n", 1,
                    sizeof("\nendstream\nendobj\n") - 1, out);
-
             str_free(&cs);
         }
     }
-
     /* CJK font objects */
     if (font_kind == FONT_CJK) {
         const unsigned char *ff = subset_data ? subset_data : g_cjk.data;
         size_t fl = subset_data ? subset_len : g_cjk.len;
-
         cjk_write_fontfile(out, offsets, cjk_file_obj, ff, fl);
         cjk_write_descriptor(out, offsets, cjk_desc_obj, cjk_file_obj);
         cjk_write_cidfont(out, offsets, cjk_cid_obj, cjk_desc_obj, used, nused);
         cjk_write_tounicode(out, offsets, cjk_tounicode_obj, used, nused);
     }
-
     /* Xref + trailer */
     long xref_pos = ftell(out);
-
     fprintf(out, "xref\n0 %d\n", total_objs + 1);
     fprintf(out, "0000000000 65535 f \n");
-
     for (int i = 1; i <= total_objs; i++)
         fprintf(out, "%010ld 00000 n \n", offsets[i]);
-
     fprintf(out,
             "trailer\n"
             "<< /Size %d /Root 1 0 R >>\n"
             "startxref\n"
             "%ld\n",
             total_objs + 1, xref_pos);
-
     fwrite("%%EOF\n", 1, sizeof("%%EOF\n") - 1, out);
-
     printf("PDF generated: %s\n", output);
-    printf("Pages: %d | Bookmarks: %d | Internal links: %zu | Images: %zu | Font: %s\n",
-           total_pages, K, ncands, nimages, basefont);
+    printf("Platform: %s\n", TXT2PDF_PLATFORM);
+    printf("Pages: %d | Bookmarks: %d | Internal links: %zu | URLs: %zu | Images: %zu | Font: %s\n",
+    total_pages, K, ncands, nurls, nimages, basefont);   
 
+    if (g_compress)
+        printf("Compression: zlib level %d (libdeflate) | streams %zu -> %zu bytes (%.1f%% saved)\n",
+               g_level, g_stat_raw, g_stat_out,
+               g_stat_raw > 0
+                   ? 100.0 * (double)(g_stat_raw - g_stat_out) / (double)g_stat_raw
+                   : 0.0);
     rc = 0;
-
 cleanup:
     if (out)
         fclose(out);
-
     if (lines) {
         for (int i = 0; i < nlines; i++)
             free(lines[i]);
-
         free(lines);
     }
-
     free(heading_map);
     free(candidate_map);
     free(toc_map);
     free(image_map);
-
     if (sections) {
         for (size_t i = 0; i < nsections; i++) {
             free(sections[i].id);
@@ -3967,47 +3512,38 @@ cleanup:
             free(sections[i].full);
             free(sections[i].title_norm);
         }
-
         free(sections);
     }
-
     if (cands) {
         for (size_t i = 0; i < ncands; i++)
             free(cands[i].text);
-
         free(cands);
     }
-
     if (vis) {
         for (size_t i = 0; i < nvis; i++)
             free(vis[i].text);
-
         free(vis);
     }
-
     if (images) {
         for (size_t i = 0; i < nimages; i++) {
             free(images[i].path);
             free(images[i].data);
             free(images[i].palette);
         }
-
         free(images);
     }
-
     free(places);
     free(outline_idx);
     free(offsets);
     free(used);
     free(subset_data);
-
     if (g_cjk.data) {
         free(g_cjk.data);
         free(g_cjk.advance);
         free(g_cjk.cmap);
     }
-
     str_free(&esc);
-
+    if (g_compressor)
+        libdeflate_free_compressor(g_compressor);
     return rc;
 }

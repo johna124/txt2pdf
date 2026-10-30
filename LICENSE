@@ -1,9 +1,42 @@
 ==============================================================================
-TXT2PDF V1.7 - THE SPARTAN PDF GENERATOR -LICENSE-
+TXT2PDF V1.8.0 - THE SPARTAN PDF GENERATOR -LICENSE-
 ==============================================================================
-SOURCE CODE: Under the GNU General Public Licence v3.0 (GPLv3).
-MANUAL (docs): Licensed under the GNU Free Documentation Licence (GFDL v1.3).
+SOURCE CODE (src/): Under the GNU General Public Licence v3.0 (GPLv3).
+TEXTS (docs/): Under the GFDL v1.3
 ==============================================================================
+Copyright (C) 2026 John (johna124)
+
+This program is FREE SOFTWARE. You can redistribute it and/or modify it under 
+the terms of the GNU General Public License as published by the Free Software 
+Foundation, either version 3 of the License, or (at your option) any later 
+version.
+
+-------------------------------------------------------------------------------
+AUTHOR'S MANIFESTO ON HYBRID ENGINEERING (AI COMPILATION ENGINE)
+-------------------------------------------------------------------------------
+This software was forged through a highly disruptive prompting process utilizing 
+the web-chat interface of Free-Tier Large Language Models (LLMs) under the 
+unyielding direction, architectural vision, and design constraints of its human 
+author. 
+
+For all legal intents and purposes, the human author asserts complete intellectual 
+authorship and technical control over the system architecture, modular layout, 
+and rigid quality control.
+
+The AI tool functioned strictly as an advanced boilerplate compilation engine; 
+the final engineering grid belongs to real human grit.
+
+-------------------------------------------------------------------------------
+THIRD-PARTY COMPONENTS
+-------------------------------------------------------------------------------
+The multi-arch static binary embeds or relies upon the following open-source 
+components, which are subject to their respective licensing terms:
+
+- LIBDEFLATE v1.26
+  License:    MIT
+  Repository: https://github.com/ebiggers/libdeflate
+
+===============================================================================
 GNU GENERAL PUBLIC LICENSE
 Version 3, 29 June 2007
 
@@ -678,3 +711,39 @@ may consider it more useful to permit linking proprietary applications with
 the library.  If this is what you want to do, use the GNU Lesser General
 Public License instead of this License.  But first, please read
 <https://www.gnu.org/licenses/why-not-lgpl.html>.
+
+===============================================================================
+APPENDIX: ADDITIONAL TERMS PERMITTED UNDER GPLv3 SECTION 7(b)
+===============================================================================
+ADDENDUM TO SECTION 7(b) OF THE GNU GENERAL PUBLIC LICENSE V3.0: 
+NOTICE OF SUBSTANTIAL HUMAN AUTHORSHIP & HYBRID ENGINEERING SPECIFICATIONS
+
+Pursuant to Section 7(b) of the GNU General Public License version 3.0, the 
+original licensor hereby requires the preservation of this specific legal notice 
+and attribution of human authorship on all present and future iterations, forks, 
+and derivative works of this material.
+
+1. ASSERTION OF PRIMARY INTELLECTUAL AUTHORSHIP:
+This software is not an unguided autonomous generation. The system architecture, 
+modular boundary layout, deterministic operational constraints, and strict 
+algorithmic topologies were entirely conceived, structured, and dictated by the 
+undersigned human author. 
+
+2. MECHANICAL COMPILATION STATUS OF GENERATIVE TOOLS:
+Any utilization of Large Language Model (LLM) interfaces during development 
+functioned strictly as a non-autonomous, machine-assisted boilerplate compilation 
+subsystem. The artificial intelligence tool acted solely as a highly responsive, 
+stateless synthesizer executing raw instructions under continuous human oversight, 
+iterative manual prompting, and relentless QA gauntlet enforcement. 
+
+3. INVIOLABILITY OF AUTHORSHIP ATTRIBUTION:
+For all legal, copyright, and contractual intents and purposes, complete 
+intellectual authorship and ultimate technical veto power reside with the human 
+architect. The engineering grid belongs to real human grit. 
+
+Any distribution, modification, or commercial sub-packaging of this software—
+including containerization or autonomous deployment pipelines—must retain this 
+notice unaltered, binding all downstream users to recognize the substantial 
+human input driving this codebase.
+===============================================================================
+
