@@ -1,11 +1,9 @@
 /*txt2pdf THE SPARTAN PDF GENERATOR
 Copyright (C) 2026  John (johna124)
-
 This program is free software: you can redistribute it and/or modify
 it under the terms of the GNU General Public License as published by
 the Free Software Foundation, either version 3 of the License, or
 (at your option) any later version.
-
 This program is distributed in the hope that it will be useful,
 but WITHOUT ANY WARRANTY; without even the implied warranty of
 MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
@@ -13,12 +11,11 @@ GNU General Public License for more details.
 You should have received a copy of the GNU General Public License
 along with this program.  If not, see https://www.gnu.org/licenses/.
 Source, issues, contact: https://github.com/johna124
-
 SUBJECT TO GPLv3 SECTION 7(b) TERMS
 FULL INTELLECTUAL AUTHORSHIP AND SYSTEM ARCHITECTURE RESIDE WITH THE HUMAN.
 ANY FORK OR DERIVATIVE WORK MUST RETAIN THE MANIFESTO IN THE LICENSE FILE.
 
-txt2pdf.c v1.9.0
+txt2pdf.c v1.9.1
 Simple TXT to PDF converter in pure C, with zlib stream compression
 via libdeflate and native PDF 1.5 object streams.
 
@@ -39,6 +36,34 @@ Proportional wrapping using built-in ASCII metrics.
 OPTIONAL CJK MODE: embedded Unicode TrueType fonts via --font FILE.ttf.
 CJK font subsetting: only used glyphs are embedded.
 zlib stream compression via libdeflate, enabled by default at level 12.
+
+Changes v1.9.1:
+Added image DPI awareness. JPEG JFIF density and PNG pHYs chunks are
+now read, so images that declare their own DPI are sized correctly
+without forcing a global value.
+Added -res N / --image-dpi N to override the display DPI for all
+images (e.g. 72, 96, 300).
+Added --center-images to center all [IMG] blocks horizontally.
+Added the [CENTER][IMG]file[/IMG][/CENTER] block tag for per-image
+centering, overriding --center-images when both are used.
+Fixed a critical argument parsing bug where --level was ignored due to
+a duplicated empty else-if block. Passing --level 9 now correctly sets
+the compression level.
+Added an early access() check to validate input file readability
+before processing, providing clearer error messages.
+Removed dead/placeholder code for image re-encoding (-q/--quality,
+--copy-image, --no-copy-image) to maintain a strictly spartan
+codebase. Users should pre-process images externally for resizing or
+compression.
+Console summary now reports the real output size and the bytes
+occupied by passthrough images, so the reported figures add up:
+  Compression: zlib level 12 (libdeflate)
+  Streams: 7697 -> 2161 bytes (71.9% saved)
+  Images (passthrough, not compressed): 10824 bytes
+  Final File size: 13583 bytes
+--debug now prints the centered flag and the display size for every
+detected image.
+
 
 Changes v1.9.0:
 Native PDF 1.5 output is now the default.
@@ -168,7 +193,7 @@ Examples:
 #include <time.h>
 #include <libdeflate.h>
 
-#define TXT2PDF_VERSION "1.9.0"
+#define TXT2PDF_VERSION "1.9.1"
 
 /* ========================================================================
    Platform detection (compile-time)
@@ -348,6 +373,7 @@ static int g_level = 12;                   /* libdeflate supports 1..12 */
 static struct libdeflate_compressor *g_compressor = NULL;
 static size_t g_stat_raw = 0;
 static size_t g_stat_out = 0;
+static size_t g_stat_img = 0;
 
 /*
  * Writes a PDF object with a stream. If compression is enabled and it
@@ -766,6 +792,10 @@ typedef struct {
     size_t         palette_len;
     double         disp_w;
     double         disp_h;
+    int            centered;
+    double         dpi_x;
+    double         dpi_y;
+
     int            obj;
 } Image;
 typedef struct {
@@ -776,6 +806,12 @@ typedef struct {
     double w;
     double h;
 } ImagePlace;
+/* Added by txt2pdf image patch */
+static double g_image_default_dpi = 96.0;
+static double g_image_force_dpi   = 0.0;
+static int    g_image_center_all  = 0;
+
+
 /* ========================================================================
 Base14 metrics
 ======================================================================== */
@@ -1099,32 +1135,62 @@ static unsigned v17_jpg_be16(const unsigned char *p)
     return (unsigned)((p[0] << 8) | p[1]);
 }
 static int v17_jpg_get_info(const unsigned char *p, size_t n,
-                            int *w, int *h, int *comps)
+                            int *w, int *h, int *comps,
+                            double *dpi_x, double *dpi_y)
 {
+    if (dpi_x) *dpi_x = 0.0;
+    if (dpi_y) *dpi_y = 0.0;
+
     if (n < 2 || p[0] != 0xFF || p[1] != 0xD8)
         return 0;
+
     size_t i = 2;
+
     while (i + 4 <= n) {
         if (p[i] != 0xFF) {
             i++;
             continue;
         }
+
         while (i < n && p[i] == 0xFF)
             i++;
+
         if (i >= n)
             break;
+
         unsigned char marker = p[i++];
+
         if (marker == 0xD8 || marker == 0x01 ||
             (marker >= 0xD0 && marker <= 0xD9)) {
             continue;
         }
+
         if (marker == 0xDA)
             break;
+
         if (i + 2 > n)
             break;
+
         unsigned seglen = (unsigned)((p[i] << 8) | p[i + 1]);
+
         if (seglen < 2 || i + seglen > n)
             break;
+
+        /* JFIF density */
+        if (marker == 0xE0 && seglen >= 14 && i + 14 <= n) {
+            if (memcmp(p + i + 2, "JFIF", 4) == 0 && p[i + 6] == 0) {
+                unsigned units = p[i + 9];
+
+                if (units == 1) {
+                    if (dpi_x) *dpi_x = (double)v17_jpg_be16(p + i + 10);
+                    if (dpi_y) *dpi_y = (double)v17_jpg_be16(p + i + 12);
+                } else if (units == 2) {
+                    if (dpi_x) *dpi_x = (double)v17_jpg_be16(p + i + 10) * 2.54;
+                    if (dpi_y) *dpi_y = (double)v17_jpg_be16(p + i + 12) * 2.54;
+                }
+            }
+        }
+
         if (marker >= 0xC0 && marker <= 0xCF &&
             marker != 0xC4 && marker != 0xC8 && marker != 0xCC) {
             if (i + 8 <= n) {
@@ -1134,10 +1200,13 @@ static int v17_jpg_get_info(const unsigned char *p, size_t n,
                 return 1;
             }
         }
+
         i += seglen;
     }
+
     return 0;
 }
+
 static unsigned v17_png_be32(const unsigned char *p)
 {
     return ((unsigned)p[0] << 24) |
@@ -1149,15 +1218,22 @@ static int v17_load_jpeg_passthrough(const char *path, Image *img)
 {
     size_t len = 0;
     char *buf = read_file(path, &len);
+
     if (!buf)
         return 0;
+
     int w = 0, h = 0, comp = 0;
-    if (!v17_jpg_get_info((const unsigned char *)buf, len, &w, &h, &comp)) {
+    double dx = 0.0, dy = 0.0;
+
+    if (!v17_jpg_get_info((const unsigned char *)buf, len,
+                          &w, &h, &comp, &dx, &dy)) {
         free(buf);
         return 0;
     }
+
     if (comp != 1 && comp != 3 && comp != 4)
         comp = 3;
+
     img->data = (unsigned char *)buf;
     img->data_len = len;
     img->kind = IMG_JPEG;
@@ -1168,47 +1244,67 @@ static int v17_load_jpeg_passthrough(const char *path, Image *img)
     img->indexed = 0;
     img->palette = NULL;
     img->palette_len = 0;
+    img->centered = 0;
+    img->dpi_x = dx;
+    img->dpi_y = dy;
+
     return 1;
 }
+
 static int v17_load_png_passthrough(const char *path, Image *img)
 {
     static const unsigned char png_sig[8] = {
         0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A
     };
+
     size_t len = 0;
     char *buf = read_file(path, &len);
+
     if (!buf)
         return 0;
+
     const unsigned char *p = (const unsigned char *)buf;
+
     if (len < 33 || memcmp(p, png_sig, 8) != 0) {
         free(buf);
         return 0;
     }
+
     int width = (int)v17_png_be32(p + 16);
     int height = (int)v17_png_be32(p + 20);
     int bit_depth = p[24];
     int color_type = p[25];
     int interlace = p[28];
+
     if (width <= 0 || height <= 0) {
         free(buf);
         return 0;
     }
+
     if (bit_depth != 8 || interlace != 0 ||
         !(color_type == 0 || color_type == 2 || color_type == 3)) {
         free(buf);
         return 0;
     }
+
     Str idat;
     str_init(&idat);
+
     unsigned char *palette = NULL;
     size_t palette_len = 0;
+    double dpi_x = 0.0;
+    double dpi_y = 0.0;
+
     size_t pos = 8;
+
     while (pos + 12 <= len) {
         unsigned clen = v17_png_be32(p + pos);
         const unsigned char *type = p + pos + 4;
         const unsigned char *cdata = p + pos + 8;
+
         if (pos + 12 + clen > len)
             break;
+
         if (memcmp(type, "IDAT", 4) == 0) {
             str_append(&idat, (const char *)cdata, clen);
         } else if (memcmp(type, "PLTE", 4) == 0) {
@@ -1216,17 +1312,29 @@ static int v17_load_png_passthrough(const char *path, Image *img)
             palette = xmalloc(clen);
             memcpy(palette, cdata, clen);
             palette_len = clen;
+        } else if (memcmp(type, "pHYs", 4) == 0 && clen == 9) {
+            unsigned xppu = v17_png_be32(cdata);
+            unsigned yppu = v17_png_be32(cdata + 4);
+
+            if (cdata[8] == 1) {
+                dpi_x = (double)xppu * 0.0254;
+                dpi_y = (double)yppu * 0.0254;
+            }
         } else if (memcmp(type, "IEND", 4) == 0) {
             break;
         }
+
         pos += 12 + clen;
     }
+
     free(buf);
+
     if (idat.len == 0 || (color_type == 3 && palette_len == 0)) {
         str_free(&idat);
         free(palette);
         return 0;
     }
+
     img->data = (unsigned char *)idat.data;
     img->data_len = idat.len;
     img->kind = IMG_PNG_PASSTHROUGH;
@@ -1237,52 +1345,128 @@ static int v17_load_png_passthrough(const char *path, Image *img)
     img->indexed = (color_type == 3);
     img->palette = palette;
     img->palette_len = palette_len;
+    img->centered = 0;
+    img->dpi_x = dpi_x;
+    img->dpi_y = dpi_y;
+
     return 1;
 }
+
 static void v17_compute_image_display_size(Image *img, double max_h)
 {
     double avail_w = PAGE_WIDTH - 2.0 * MARGIN;
     double avail_h = max_h;
+
     if (avail_h <= 0.0)
         avail_h = PAGE_HEIGHT - 2.0 * MARGIN;
-    double w = (double)img->width;
-    double h = (double)img->height;
+
+    double dx = img->dpi_x;
+    double dy = img->dpi_y;
+
+    if (g_image_force_dpi > 0.0) {
+        dx = g_image_force_dpi;
+        dy = g_image_force_dpi;
+    }
+
+    if (dx <= 0.0)
+        dx = g_image_default_dpi;
+
+    if (dy <= 0.0)
+        dy = dx;
+
+    if (dx <= 0.0)
+        dx = 72.0;
+
+    if (dy <= 0.0)
+        dy = 72.0;
+
+    double w = (double)img->width * 72.0 / dx;
+    double h = (double)img->height * 72.0 / dy;
+
     double scale = 1.0;
+
     if (w > avail_w)
         scale = avail_w / w;
+
     if (h * scale > avail_h)
         scale = avail_h / h;
+
     if (scale <= 0.0)
         scale = 1.0;
+
     img->disp_w = w * scale;
     img->disp_h = h * scale;
+
     if (img->disp_w < 1.0)
         img->disp_w = 1.0;
+
     if (img->disp_h < 1.0)
         img->disp_h = 1.0;
 }
-static int v17_parse_img_line(const char *line, char **path_out)
+
+static int v17_parse_img_line(const char *line,
+                              char **path_out,
+                              int *center_out)
 {
-    const char *open = strstr(line, "[IMG]");
-    if (!open || open != line)
+    int center = 0;
+    const char *p = line;
+
+    while (isspace((unsigned char)*p))
+        p++;
+
+    if (v17_str_ncasecmp(p, "[CENTER]", 8)) {
+        center = 1;
+        p += 8;
+
+        while (isspace((unsigned char)*p))
+            p++;
+    }
+
+    const char *open = strstr(p, "[IMG]");
+    if (!open || open != p)
         return 0;
+
     open += 5;
+
     const char *close = strstr(open, "[/IMG]");
     if (!close)
         return 0;
+
+    while (open < close && isspace((unsigned char)*open))
+        open++;
+
     const char *end = close;
     while (end > open && isspace((unsigned char)end[-1]))
         end--;
+
     const char *after = close + 6;
     while (isspace((unsigned char)*after))
         after++;
+
+    if (center) {
+        if (!v17_str_ncasecmp(after, "[/CENTER]", 9))
+            return 0;
+
+        after += 9;
+
+        while (isspace((unsigned char)*after))
+            after++;
+    }
+
     if (*after != '\0')
         return 0;
+
     if (end <= open)
         return 0;
+
     *path_out = xstrndup(open, (size_t)(end - open));
+
+    if (center_out)
+        *center_out = center;
+
     return 1;
 }
+
 static int v17_add_image(Image **imgs, size_t *n, size_t *cap, Image *img)
 {
     if (*n == *cap) {
@@ -2699,6 +2883,13 @@ static void print_usage(FILE *fh, const char *prog)
         "  --objstm                    Alias for --object-streams=generate\n"
         "  --no-object-streams         Alias for --object-streams=disable\n"
         "\n"
+        "Image options:\n"
+        "  -res N, --image-dpi N       Force DPI used to size images (e.g. 72, 96, 300)\n"
+        "  --center-images             Center all [IMG] blocks\n"
+        "\n"
+        "  Block tags: [IMG]file.jpg[/IMG], [IMG]file.png[/IMG]\n"
+        "              [CENTER][IMG]file.jpg[/IMG][/CENTER]\n"
+        "\n"
         "Other:\n"
         "  --debug                     Verbose diagnostics\n"
         "  -h, --help                  Show this help\n"
@@ -2707,9 +2898,11 @@ static void print_usage(FILE *fh, const char *prog)
         "Examples:\n"
         "  %s readme.txt readme.pdf\n"
         "  %s --compress --level 12 readme.txt readme.pdf\n"
-        "  %s --font NotoSansJP-Regular.ttf doc.txt doc.pdf\n",
-        prog, prog, prog, prog);
+        "  %s --font NotoSansJP-Regular.ttf doc.txt doc.pdf\n"
+        "  %s -res 96 --center-images readme.txt readme.pdf\n",
+        prog, prog, prog, prog, prog);
 }
+
 
 
     static void print_version(void)
@@ -2738,9 +2931,6 @@ static void print_usage(FILE *fh, const char *prog)
 /* ========================================================================
 main()
 ======================================================================== */
-/* BEGIN txt2pdf-native-pdf15-patch v1 */
-/* PDF 1.5 native object streams + cross-reference streams.
-   No external qpdf dependency. */
 
 static int g_pdf_minor = 5;        /* default: PDF 1.5 */
 static int g_objstm_generate = 1;  /* default: --object-streams=generate */
@@ -3001,23 +3191,23 @@ int main(int argc, char **argv)
                 return 1;
             }
             font_path = argv[++i];
+   
         } else if (strcmp(argv[i], "--no-compress") == 0) {
-            g_compress = 0;
-        } else if (strcmp(argv[i], "--level") == 0) {
-        } else if (strcmp(argv[i], "--compress") == 0) {
-            g_compress = 1;
-        } else if (strcmp(argv[i], "--level") == 0) {
-            if (i + 1 >= argc) {
-                fprintf(stderr, "--level requires a number between 1 and 12\n");
-                return 1;
-            }
-            g_level = atoi(argv[++i]);
-            if (g_level < 1 || g_level > 12) {
-                fprintf(stderr, "Invalid compression level %d (use 1-12)\n",
-                        g_level);
-                return 1;
-            }
-            g_compress = 1;
+        g_compress = 0;
+      } else if (strcmp(argv[i], "--compress") == 0) {
+        g_compress = 1;
+     } else if (strcmp(argv[i], "--level") == 0) {
+      if (i + 1 >= argc) {
+        fprintf(stderr, "--level requires a number between 1 and 12\n");
+        return 1;
+    }
+    g_level = atoi(argv[++i]);
+    if (g_level < 1 || g_level > 12) {
+        fprintf(stderr, "Invalid compression level %d (use 1-12)\n", g_level);
+        return 1;
+    }
+    g_compress = 1;
+
         } else if (strcmp(argv[i], "--pdf15") == 0) {
             g_pdf_minor = 5;
             g_objstm_generate = 1;
@@ -3055,7 +3245,21 @@ int main(int argc, char **argv)
                 fprintf(stderr, "Invalid --object-streams mode: %s\n", mode);
                 return 1;
             }
-        } else if (argv[i][0] == '-' && argv[i][1] != '\0') {
+    } else if (strcmp(argv[i], "--res") == 0 || strcmp(argv[i], "--image-dpi") == 0) {
+        char *endp = NULL;
+        if (i + 1 >= argc) {
+            fprintf(stderr, "--res/--image-dpi requires a positive DPI value\n");
+            return 1;
+        }
+        g_image_force_dpi = strtod(argv[++i], &endp);
+        if (!endp || *endp != '\0' || g_image_force_dpi <= 0.0) {
+            fprintf(stderr, "Invalid image DPI value\n");
+            return 1;
+        }
+    } else if (strcmp(argv[i], "--center-images") == 0) {
+        g_image_center_all = 1;
+  
+    } else if (argv[i][0] == '-' && argv[i][1] != '\0') {
             fprintf(stderr, "Unknown option: %s\nTry '%s --help'\n",
                     argv[i], argv[0]);
             return 1;
@@ -3067,8 +3271,7 @@ int main(int argc, char **argv)
             fprintf(stderr, "Too many arguments\nTry '%s --help'\n", argv[0]);
             return 1;
         }
-    }
-
+}
     if (!input || !output) {
         fprintf(stderr,
                 "Usage: %s [options] input.txt output.pdf   (see --help)\n",
@@ -3084,7 +3287,12 @@ int main(int argc, char **argv)
                     g_level);
             return 1;
         }
-    }
+}
+
+         if (access(input, R_OK) != 0) {
+     fprintf(stderr, "Cannot read '%s' (no existe o sin permiso)\n", input);
+     return 1;
+ }
 
     size_t len = 0;
     char *data = read_file(input, &len);
@@ -3268,36 +3476,42 @@ int main(int argc, char **argv)
     }
 
     /* Detect images */
-    for (int i = 0; i < nlines; i++) {
-        char *trimmed = trim_dup(lines[i]);
-        char *imgpath = NULL;
-        if (v17_parse_img_line(trimmed, &imgpath)) {
-            Image img;
-            memset(&img, 0, sizeof(img));
-            img.path = xstrdup(imgpath);
-            int ok = 0;
-            if (v17_has_jpeg_extension(imgpath))
-                ok = v17_load_jpeg_passthrough(imgpath, &img);
-            else if (v17_has_png_extension(imgpath))
-                ok = v17_load_png_passthrough(imgpath, &img);
-            if (ok) {
-                v17_compute_image_display_size(&img, max_image_h);
-                image_map[i] = v17_add_image(&images, &nimages, &capimages, &img);
-                if (debug) {
-                    fprintf(stderr,
-                            "[debug] IMAGE line %d path '%s' %dx%d disp %.2fx%.2f\n",
-                            i + 1, img.path, img.width, img.height,
-                            img.disp_w, img.disp_h);
-                }
-            } else {
-                if (debug)
-                    fprintf(stderr, "[debug] Cannot load image: '%s'\n", imgpath);
-                free(img.path);
+for (int i = 0; i < nlines; i++) {
+    char *trimmed = trim_dup(lines[i]);
+    char *imgpath = NULL;
+    int img_center = 0;
+    if (v17_parse_img_line(trimmed, &imgpath, &img_center)) {
+        Image img;
+        memset(&img, 0, sizeof(img));
+        img.path = xstrdup(imgpath);
+        int ok = 0;
+        if (v17_has_jpeg_extension(imgpath))
+            ok = v17_load_jpeg_passthrough(imgpath, &img);
+        else if (v17_has_png_extension(imgpath))
+            ok = v17_load_png_passthrough(imgpath, &img);
+
+        /* FIX: aplicar DESPUÉS del loader, que inicializa centered = 0 */
+        img.centered = img_center || g_image_center_all;
+
+        if (ok) {
+            v17_compute_image_display_size(&img, max_image_h);
+            image_map[i] = v17_add_image(&images, &nimages, &capimages, &img);
+            if (debug) {
+                fprintf(stderr,
+                        "[debug] IMAGE line %d path '%s' %dx%d disp %.2fx%.2f centered=%d\n",
+                        i + 1, img.path, img.width, img.height,
+                        img.disp_w, img.disp_h, img.centered);
             }
-            free(imgpath);
+        } else {
+            if (debug)
+                fprintf(stderr, "[debug] Cannot load image: '%s'\n", imgpath);
+            free(img.path);
         }
-        free(trimmed);
+        free(imgpath);
     }
+    free(trimmed);
+}
+
     /* Page layout */
     int current_page = 1;
     int line_on_page = 0;
@@ -3319,9 +3533,14 @@ int main(int argc, char **argv)
             double y = top - img->disp_h;
             if (y < MARGIN)
                 y = MARGIN;
-            v17_add_image_placement(&places, &nplaces, &capplaces,
-                                    current_page, image_map[i],
-                                    MARGIN, y, img->disp_w, img->disp_h);
+            double x = MARGIN;
+         if (img->centered) {
+             x = MARGIN + (max_width - img->disp_w) / 2.0;
+             if (x < MARGIN) x = MARGIN;
+         }
+         v17_add_image_placement(&places, &nplaces, &capplaces,
+                                 current_page, image_map[i],
+                                 x, y, img->disp_w, img->disp_h);
             line_on_page += needed;
             continue;
         }
@@ -3901,6 +4120,7 @@ for (int j = 0; j < K; j++) {
                     cs,
                     img->data_len);
             fwrite(img->data, 1, img->data_len, out);
+            g_stat_img += img->data_len;
             fwrite("\nendstream\nendobj\n", 1,
                    sizeof("\nendstream\nendobj\n") - 1, out);
         } else if (img->kind == IMG_PNG_PASSTHROUGH) {
@@ -3935,6 +4155,7 @@ for (int j = 0; j < K; j++) {
                     img->width,
                     img->data_len);
             fwrite(img->data, 1, img->data_len, out);
+            g_stat_img += img->data_len;
             fwrite("\nendstream\nendobj\n", 1,
                    sizeof("\nendstream\nendobj\n") - 1, out);
             str_free(&cs);
@@ -3975,18 +4196,23 @@ if (g_objstm_generate) {
     fwrite("%%EOF\n", 1, sizeof("%%EOF\n") - 1, out);
 }
 
-printf("PDF generated: %s\n", output);
-    printf("Platform: %s\n", TXT2PDF_PLATFORM);
-    printf("Pages: %d | Bookmarks: %d | Internal links: %zu | URLs: %zu | Images: %zu | Font: %s\n",
-    total_pages, K, ncands, nurls, nimages, basefont);   
+long pdf_size = ftell(out);
 
-    if (g_compress)
-        printf("Compression: zlib level %d (libdeflate) | streams %zu -> %zu bytes (%.1f%% saved)\n",
-               g_level, g_stat_raw, g_stat_out,
-               g_stat_raw > 0
-                   ? 100.0 * (double)(g_stat_raw - g_stat_out) / (double)g_stat_raw
-                   : 0.0);
-    rc = 0;
+printf("PDF generated: %s\n", output);
+printf("Platform: %s\n", TXT2PDF_PLATFORM);
+printf("Pages: %d | Bookmarks: %d | Internal links: %zu | URLs: %zu | Images: %zu | Font: %s\n",
+       total_pages, K, ncands, nurls, nimages, basefont);
+
+if (g_compress) {
+    printf("Compression: zlib level %d (libdeflate)\n", g_level);
+    printf("Streams: %zu -> %zu bytes (%.1f%% saved)\n",
+           g_stat_raw, g_stat_out,
+           g_stat_raw > 0
+               ? 100.0 * (double)(g_stat_raw - g_stat_out) / (double)g_stat_raw
+               : 0.0);
+    printf("Images (passthrough, not compressed): %zu bytes\n", g_stat_img);
+}
+printf("Final File size: %ld bytes\n", pdf_size);
 
 cleanup:
     if (out)
