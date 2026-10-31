@@ -80,7 +80,7 @@ esac
 # ============================================================
 # DETERMINISTIC BUILD SETTINGS
 # ============================================================
-export SOURCE_DATE_EPOCH="${SOURCE_DATE_EPOCH:-1793371215}"
+export SOURCE_DATE_EPOCH="${SOURCE_DATE_EPOCH:-1793453584}"
 export ZERO_AR_DATE=1
 
 echo "🔒 Deterministic build frozen at epoch: $SOURCE_DATE_EPOCH"
