@@ -67,24 +67,6 @@ matching section, and section headers without any TOC link, to
 reconcile the Bookmarks vs Internal links counts.
 
 
-txt2pdf.c v1.8.0
-Simple TXT to PDF converter in pure C, with optional libdeflate
-compression for the PDF streams.
-
-Features:
-Generates PDF 1.4 directly.
-Base14 fonts: Courier (default), Helvetica and Times-Roman.
-Auto-detection of UTF-8 vs Latin-1/ISO-8859-1 input.
-PDF bookmarks (outline) for numbered sections.
-Internal links in the TOC.
-Block images: [IMG]file.jpg[/IMG] and [IMG]file.png[/IMG].
-JPEG embedded via native /DCTDecode passthrough.
-Simple PNG embedded via /FlateDecode with PNG predictor.
-Proportional wrapping using built-in ASCII metrics.
-OPTIONAL CJK MODE: embedded Unicode TrueType fonts via --font FILE.ttf.
-CJK font subsetting: only used glyphs are embedded.
-Optional zlib stream compression via libdeflate (--compress).
-
 Changes v1.8.0:
 Added --compress to compress PDF streams (page content, ToUnicode
 CMap and FontFile2) with zlib via libdeflate (/FlateDecode).
