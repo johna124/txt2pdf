@@ -2884,7 +2884,7 @@ static void print_usage(FILE *fh, const char *prog)
         "  --no-object-streams         Alias for --object-streams=disable\n"
         "\n"
         "Image options:\n"
-        "  -res N, --image-dpi N       Force DPI used to size images (e.g. 72, 96, 300)\n"
+        "  --res N, --image-dpi N       Force DPI used to size images (e.g. 72, 96, 300)\n"
         "  --center-images             Center all [IMG] blocks\n"
         "\n"
         "  Block tags: [IMG]file.jpg[/IMG], [IMG]file.png[/IMG]\n"
@@ -2899,7 +2899,7 @@ static void print_usage(FILE *fh, const char *prog)
         "  %s readme.txt readme.pdf\n"
         "  %s --compress --level 12 readme.txt readme.pdf\n"
         "  %s --font NotoSansJP-Regular.ttf doc.txt doc.pdf\n"
-        "  %s -res 96 --center-images readme.txt readme.pdf\n",
+        "  %s --res 96 --center-images readme.txt readme.pdf\n",
         prog, prog, prog, prog, prog);
 }
 
