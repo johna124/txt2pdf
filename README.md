@@ -1,4 +1,4 @@
-# TXT2PDF (v1.9.1) — THE SPARTAN PDF GENERATOR
+# TXT2PDF (v1.9.2) — THE SPARTAN PDF GENERATOR
 
 > "Turn plain text into structured PDFs without asking for permission.  
 > Now the objects come out folded."
@@ -23,12 +23,32 @@ Legacy PDF 1.4 output remains available with `--pdf14`.
 - **Native Image Passthrough**: JPEG and PNG embedding without recompression, with DPI awareness.
 - **Image Centering**: Per-image `[CENTER]` tag and global `--center-images` option.
 - **Image DPI Awareness**: JPEG JFIF density and PNG pHYs chunks are read automatically; `-res N` overrides the display DPI.
-- **Unicode CJK Fonts**: Embedded TrueType font support via `--font FILE.ttf`.
+- Unicode CJK Fonts: Embedded TrueType font support via `--font FILE.ttf` (auto-detected since v1.9.2: only used when the document contains real CJK text).
 - **TrueType Subsetting**: Embeds only the glyphs used by the document.
 - **External URL Links**: Automatic detection of `http://`, `https://`, `ftp://` and `www.` URLs, rendered as blue underlined clickable links.
 - **Multi-Architecture**: Cross-compiles cleanly to RISC-V, x86_64, and ARM with zero code changes.
 - **Deterministic Builds**: Reproducible binaries with `SOURCE_DATE_EPOCH` and `ZERO_AR_DATE`.
 
+
+## What Is New In v1.9.2
+Version 1.9.2 makes `--font` smart: the Unicode TrueType pipeline is only activated when the document really contains CJK text.
+
+### Main changes
+- `--font` auto-detection: `--font FILE.ttf` now scans the document for real CJK codepoints (ideographs, kana, hangul, fullwidth forms) before enabling the TrueType pipeline.
+- Documents without CJK text keep the Base14 font (Courier by default, or the one selected with `--sans`/`--serif`): nothing is embedded, streams stay small and fixed-width ASCII art stays perfectly aligned.
+- Documents with CJK text embed the selected TrueType font exactly as before (subsetted, Identity-H, ToUnicode).
+- Non-CJK characters outside WinAnsi (e.g. an isolated emoji) are printed as '?' in Base14 mode, as in previous versions.
+
+### New --debug diagnostics
+    [debug] No CJK chars detected: keeping Base14 font (--font ignored)
+    [debug] CJK chars detected, embedding font: <resolved-path>
+
+### Example
+No CJK text: keeps Courier, minimal size, ASCII art aligned:
+./txt2pdf --font NotoSansJP-Regular.ttf report.txt report.pdf
+
+Document with Japanese text: embeds subsetted Noto Sans JP:
+./txt2pdf --font NotoSansJP-Regular.ttf roadmap.txt roadmap.pdf
 
 ## What Is New In v1.9.1
 
@@ -190,6 +210,7 @@ The `[CENTER]` tag overrides `--center-images` when both are used.
 - OpenType/CFF `.otf` files are not supported yet.
 - TrueType collections `.ttc` are not supported yet.
 - When `--font` is used, it overrides `--sans`, `--serif` and `--mono`.
+- Since v1.9.2, `--font` is auto-detected: the TrueType pipeline only activates when the document contains real CJK codepoints. Without CJK text the Base14 font is kept (no embedding, ASCII art aligned).
 
 
 ## URL Links
@@ -323,7 +344,7 @@ While tools like Pandoc, LibreOffice, or WebKit-based converters are excellent f
 
 `txt2pdf` cuts the bloat entirely. It natively parses your raw text stream, automatically detects document hierarchy, and embeds cross-linked internal navigation and PDF outlines out of the box. It is designed to run inside ultra-low-power RISC-V/ARM64 dev-boards, minimal Docker containers, or bare-metal environments where modern runtimes simply choke.
 
-With v1.7.2, it gained subsetted TrueType embedding for real Unicode CJK text. With v1.8.0, it squeezed every text stream through libdeflate at level 12 and turned every URL into a clickable link. With v1.9.0, it eliminated the need for `qpdf` by generating native PDF 1.5 object streams directly. And with v1.9.1, it added image DPI awareness, per-image centering, accurate file size reporting, and a cleaner, strictly spartan codebase.
+With v1.7.2, it gained subsetted TrueType embedding for real Unicode CJK text. With v1.8.0, it squeezed every text stream through libdeflate at level 12 and turned every URL into a clickable link. With v1.9.0, it eliminated the need for `qpdf` by generating native PDF 1.5 object streams directly. And with v1.9.1, it added image DPI awareness, per-image centering, accurate file size reporting, and a cleaner, strictly spartan codebase. And with v1.9.2, `--font` became smart: the Unicode TrueType pipeline only activates for documents with real CJK text, keeping ASCII-heavy reports in Courier with zero font embedding.
 
 
 ## The Spartan Advantage
@@ -332,7 +353,7 @@ While Adobe Acrobat and LibreOffice are excellent for rich document design, they
 
 `txt2pdf` cuts the bloat entirely. It natively parses your raw text stream, automatically detects document hierarchy, and embeds cross-linked internal navigation and PDF outlines out of the box, all while running inside an ultra-low-power RISC-V/ARM64 dev-board or bare-metal environment using minimal CPU and RAM.
 
-With v1.7.2, `txt2pdf` gained subsetted TrueType embedding for real Unicode CJK text. With v1.8.0, it squeezed every text stream through libdeflate at level 12 and turned every `http://`/`https://`/`www.` URL into a clickable blue underlined link. With v1.9.0, it generates native PDF 1.5 object streams and cross-reference streams directly inside the static binary, reducing structural PDF overhead without requiring `qpdf` or any external post-processing tool, and renders internal TOC links as clean blue text with codepoint-exact click rectangles. With v1.9.1, it adds image DPI awareness, per-image and global centering, accurate file size statistics, and cleans up the codebase of unused placeholder options.
+With v1.7.2, `txt2pdf` gained subsetted TrueType embedding for real Unicode CJK text. With v1.8.0, it squeezed every text stream through libdeflate at level 12 and turned every `http://`/`https://`/`www.` URL into a clickable blue underlined link. With v1.9.0, it generates native PDF 1.5 object streams and cross-reference streams directly inside the static binary, reducing structural PDF overhead without requiring `qpdf` or any external post-processing tool, and renders internal TOC links as clean blue text with codepoint-exact click rectangles. With v1.9.1, it adds image DPI awareness, per-image and global centering, accurate file size statistics, and cleans up the codebase of unused placeholder options. And with v1.9.2, `--font` became smart: the Unicode TrueType pipeline only activates for documents with real CJK text, keeping ASCII-heavy reports in Courier with zero font embedding.
 
 
 ## How It Works (The Core Parser)
@@ -358,6 +379,7 @@ It reports:
 
 - detected encoding
 - selected font
+- font auto-detection decision (CJK pipeline vs Base14)
 - compression mode and level
 - PDF version and object-stream mode
 - lines marked as part of a contents block
@@ -395,6 +417,7 @@ Built for systems hackers and ultra-low-power environments, `txt2pdf` is designe
 - PNG support is limited to simple 8-bit non-interlaced images.
 - URLs are only linked when they fit entirely inside one visual line.
 - Base14 mode is limited to WinAnsiEncoding.
+- Since v1.9.2, `--font` is ignored when the document has no CJK codepoints; characters outside WinAnsi (emoji, symbols) are printed as '?' in Base14 mode.
 - CJK mode requires an individual `.ttf` file; `.otf` and `.ttc` are not supported yet.
 - Images are embedded untouched; no re-encoding is performed. To resize or recompress, do it on the source file before running `txt2pdf`.
 

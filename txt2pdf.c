@@ -15,7 +15,7 @@ SUBJECT TO GPLv3 SECTION 7(b) TERMS
 FULL INTELLECTUAL AUTHORSHIP AND SYSTEM ARCHITECTURE RESIDE WITH THE HUMAN.
 ANY FORK OR DERIVATIVE WORK MUST RETAIN THE MANIFESTO IN THE LICENSE FILE.
 
-txt2pdf.c v1.9.1
+txt2pdf.c v1.9.2
 Simple TXT to PDF converter in pure C, with zlib stream compression
 via libdeflate and native PDF 1.5 object streams.
 
@@ -36,6 +36,11 @@ Proportional wrapping using built-in ASCII metrics.
 OPTIONAL CJK MODE: embedded Unicode TrueType fonts via --font FILE.ttf.
 CJK font subsetting: only used glyphs are embedded.
 zlib stream compression via libdeflate, enabled by default at level 12.
+
+Changes v1.9.2:
+--font is now auto-detected: the TTF/Unicode pipeline is only enabled
+when the document contains real CJK codepoints. Documents without CJK
+text keep the Base14 font (no embedding, ASCII art stays aligned).
 
 Changes v1.9.1:
 Added image DPI awareness. JPEG JFIF density and PNG pHYs chunks are
@@ -193,7 +198,7 @@ Examples:
 #include <time.h>
 #include <libdeflate.h>
 
-#define TXT2PDF_VERSION "1.9.1"
+#define TXT2PDF_VERSION "1.9.2"
 
 /* ========================================================================
    Platform detection (compile-time)
@@ -943,6 +948,53 @@ static int v17_decode_utf8(const unsigned char *p,
     *consume = (size_t)need;
     return 1;
 }
+/* ========================================================================
+Auto-deteccion CJK: necesita el documento una fuente Unicode/CJK?
+Devuelve 1 solo si existe algun codepoint en rangos CJK reales.
+Los simbolos/emojis fuera de Latin-1 NO activan el modo TTF: se
+imprimen como '?' por la ruta Base14, igual que sin --font.
+py-patch: cjk-autodetect v2
+======================================================================== */
+static int cp_is_cjk(int cp)
+{
+    return (cp >= 0x1100 && cp <= 0x11FF) ||   /* Hangul Jamo             */
+           (cp >= 0x2E80 && cp <= 0x2EFF) ||   /* CJK Radicals Supplement */
+           (cp >= 0x3000 && cp <= 0x303F) ||   /* CJK Symbols/Punctuation */
+           (cp >= 0x3040 && cp <= 0x309F) ||   /* Hiragana                */
+           (cp >= 0x30A0 && cp <= 0x30FF) ||   /* Katakana                */
+           (cp >= 0x3100 && cp <= 0x312F) ||   /* Bopomofo                */
+           (cp >= 0x3130 && cp <= 0x318F) ||   /* Hangul Compatibility    */
+           (cp >= 0x31F0 && cp <= 0x31FF) ||   /* Katakana Extensions     */
+           (cp >= 0x3400 && cp <= 0x4DBF) ||   /* CJK Extension A         */
+           (cp >= 0x4E00 && cp <= 0x9FFF) ||   /* CJK Unified Ideographs  */
+           (cp >= 0xA000 && cp <= 0xA4CF) ||   /* Yi                      */
+           (cp >= 0xAC00 && cp <= 0xD7AF) ||   /* Hangul Syllables        */
+           (cp >= 0xF900 && cp <= 0xFAFF) ||   /* CJK Compat Ideographs   */
+           (cp >= 0xFE30 && cp <= 0xFE4F) ||   /* CJK Compat Forms        */
+           (cp >= 0xFF00 && cp <= 0xFFEF) ||   /* Half/Fullwidth Forms    */
+           (cp >= 0x20000 && cp <= 0x2FA1F);   /* CJK Ext B-F + Supp      */
+}
+
+static int needs_cjk_font(const char *data, size_t len)
+{
+    size_t i = 0;
+    while (i < len) {
+        unsigned char c = (unsigned char)data[i];
+        if (c < 0x80) { i++; continue; }          /* ASCII: nunca CJK     */
+        if (!g_is_utf8) return 0;                 /* Latin-1: nunca CJK   */
+        int cp = 0;
+        size_t cons = 1;
+        if (!v17_decode_utf8((const unsigned char *)data, i, len, &cp, &cons)) {
+            i++;
+            continue;
+        }
+        if (cp_is_cjk(cp))
+            return 1;
+        i += cons;
+    }
+    return 0;
+}
+
 static void v17_advance_char(const char *s,
                              size_t off,
                              size_t slen,
@@ -3302,18 +3354,26 @@ int main(int argc, char **argv)
     }
     g_is_utf8 = detect_if_utf8(data, len);
     if (font_path) {
-        char *resolved_font = resolve_font_path(font_path);
-        if (!cjk_load_ttf(resolved_font, &g_cjk)) {
-            fprintf(stderr, "Cannot load TTF font: %s\n", resolved_font);
+        /* py-patch: cjk-autodetect v2 -- solo usar el TTF si hay caracteres CJK reales */
+        if (!needs_cjk_font(data, len)) {
+            if (debug)
+                fprintf(stderr,
+                        "[debug] No CJK chars detected: keeping Base14 font (--font ignored)\n");
+            font_path = NULL;
+        } else {
+            char *resolved_font = resolve_font_path(font_path);
+            if (!cjk_load_ttf(resolved_font, &g_cjk)) {
+                fprintf(stderr, "Cannot load TTF font: %s\n", resolved_font);
+                free(resolved_font);
+                free(data);
+                return 1;
+            }
+            if (debug) {
+                fprintf(stderr, "[debug] CJK chars detected, embedding font: %s\n", resolved_font);
+            }
             free(resolved_font);
-            free(data);
-            return 1;
+            font_kind = FONT_CJK;
         }
-        if (debug) {
-            fprintf(stderr, "[debug] Resolved CJK font: %s\n", resolved_font);
-        }
-        free(resolved_font);
-        font_kind = FONT_CJK;
     }
     if (debug) {
         fprintf(stderr, "[debug] Detected encoding: %s\n",
