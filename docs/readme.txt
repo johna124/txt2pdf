@@ -1,7 +1,7 @@
 ==============================================================================
-TXT2PDF V1.9.1 - THE SPARTAN PDF GENERATOR
+TXT2PDF V1.9.2 - THE SPARTAN PDF GENERATOR
 Zero-dependency TXT to PDF converter in pure C11
-Now with native PDF 1.5 object streams and image DPI awareness
+Now with smart --font auto-detection (CJK) and image DPI awareness
 ==============================================================================
 
 "Turn plain text into structured PDFs without asking for permission.
@@ -19,7 +19,7 @@ Output:         PDF 1.5 by default (PDF 1.4 with --pdf14) with outlines,
                 TrueType fonts, images with DPI awareness, zlib-compressed
                 streams, native object streams, native cross-reference
                 streams, and clickable URL links
-Status:         v1.9.1 bug-fix and polish release
+Status:         v1.9.2 smart --font auto-detection release
 
 ==============================================================================
 QUICK START
@@ -71,23 +71,24 @@ QUICK START
 ==============================================================================
 
 1.What is txt2pdf?
-2.What is new in v1.9.1?
-3.What is new in v1.9.0?
-4.Fonts and typography
-5.Stream compression (libdeflate)
-6.Url links
-7.Image support
-8.Parser rules
-9.Table of contents rules
-10.Usage and debug mode
-11.Minimal working structure
-12.Pdf internals
-13.Project structure
-14.Building and static cookbook
-15.Known limitations
-16.Troubleshooting
-17.Comparison and design philosoph
-18.License and credits
+2.What is new in v1.9.2?
+3.What is new in v1.9.1?
+4.What is new in v1.9.0?
+5.Fonts and typography
+6.Stream compression (libdeflate)
+7.Url links
+8.Image support
+9.Parser rules
+10.Table of contents rules
+11.Usage and debug mode
+12.Minimal working structure
+13.Pdf internals
+14.Project structure
+15.Building and static cookbook
+16.Known limitations
+17.Troubleshooting
+18.Comparison and design philosoph
+19.License and credits
 
 ==============================================================================
 1. WHAT IS TXT2PDF?
@@ -116,7 +117,43 @@ It is designed for environments where installing dependencies is impossible,
 unwanted, or where the network is down.
 
 ==============================================================================
-2. WHAT IS NEW IN V1.9.1?
+2. WHAT IS NEW IN V1.9.2?
+==============================================================================
+Version 1.9.2 makes --font smart: the Unicode TrueType pipeline is
+only activated when the document actually contains CJK text.
+
+New behavior:
+- --font FILE.ttf now scans the document for real CJK codepoints
+  (ideographs, kana, hangul, fullwidth forms).
+- Documents without CJK text keep the Base14 font (Courier by
+  default, or the one selected with --sans/--serif), so:
+  - No font is embedded: PDFs stay minimal.
+  - Fixed-width ASCII art and log layouts stay perfectly aligned.
+- Documents with CJK text embed the TrueType font exactly as
+  before (subsetted, Identity-H, ToUnicode).
+- Characters outside WinAnsi that are not CJK (e.g. an isolated
+  emoji) are printed as '?' in Base14 mode, as before.
+
+New --debug diagnostics:
+- [debug] No CJK chars detected: keeping Base14 font (--font ignored)
+- [debug] CJK chars detected, embedding font: <path>
+
+All v1.9.1 features remain unchanged:
+- Image DPI awareness (JPEG JFIF, PNG pHYs) and -res N.
+- --center-images and [CENTER][IMG]...[/IMG][/CENTER].
+- Accurate file size statistics.
+
+All v1.9.0 features also remain unchanged:
+- Native PDF 1.5 object streams and cross-reference streams.
+- Internal TOC links with codepoint-exact click rectangles.
+
+All v1.8.0 features also remain unchanged:
+- zlib stream compression with libdeflate (level 12 by default).
+- External URL links (http://, https://, ftp://, www.).
+- Multi-architecture builds and deterministic builds.
+
+==============================================================================
+3. WHAT IS NEW IN V1.9.1?
 ==============================================================================
 
 Version 1.9.1 is a bug-fix and polish release. No new major features, but
@@ -165,7 +202,7 @@ All v1.8.0 features also remain unchanged:
 - Deterministic builds with SOURCE_DATE_EPOCH and ZERO_AR_DATE.
 
 ==============================================================================
-3. WHAT IS NEW IN V1.9.0?
+4. WHAT IS NEW IN V1.9.0?
 ==============================================================================
 
 Version 1.9.0 adds native PDF 1.5 object streams and native cross-reference
@@ -228,10 +265,10 @@ All v1.7.2 features also remain unchanged:
 - Outlines, internal links, UTF-8 and WinAnsi support.
 
 ==============================================================================
-4. FONTS AND TYPOGRAPHY
+5. FONTS AND TYPOGRAPHY
 ==============================================================================
 
-txt2pdf v1.9.1 supports two font pipelines.
+txt2pdf v1.9.2 supports two font pipelines.
 
 A. Base14 fonts (classic mode):
   --mono     Courier (default, classic txt2pdf layout)
@@ -263,15 +300,18 @@ Important notes:
 - OpenType/CFF .otf files are not supported yet.
 - TrueType collections .ttc are not supported yet.
 - When --font is used, it overrides --sans, --serif and --mono.
+- Since v1.9.2, --font only activates the TrueType pipeline when the
+  document contains real CJK codepoints; otherwise the Base14 font
+  is kept (no embedding, ASCII art stays aligned).
 - The selected font is used for ALL text (ASCII, Latin, CJK).
 - Only the glyphs actually used in the document are embedded.
 - The embedded FontFile2 stream is zlib-compressed by default.
 
 ==============================================================================
-5. STREAM COMPRESSION (LIBDEFLATE)
+6. STREAM COMPRESSION (LIBDEFLATE)
 ==============================================================================
 
-txt2pdf v1.9.1 compresses PDF streams with zlib using the libdeflate
+txt2pdf v1.9.2 compresses PDF streams with zlib using the libdeflate
 library, which is compiled directly into the static binary.
 
 What gets compressed:
@@ -311,7 +351,7 @@ Behavior notes:
   Final File size: 13583 bytes
 
 ==============================================================================
-6. URL LINKS
+7. URL LINKS
 ==============================================================================
 
 External URLs in the text are automatically detected and converted to
@@ -343,7 +383,7 @@ Limitations:
   internal links).
 
 ==============================================================================
-7. IMAGE SUPPORT
+8. IMAGE SUPPORT
 ==============================================================================
 
 txt2pdf supports standalone block images with DPI awareness.
@@ -405,7 +445,7 @@ Images are embedded untouched. If you need to resize or recompress them,
 do it on the source file before running txt2pdf.
 
 ==============================================================================
-8. PARSER RULES
+9. PARSER RULES
 ==============================================================================
 
 The parser creates PDF bookmarks only for lines that are real section
@@ -444,7 +484,7 @@ The parser supports hierarchical IDs such as:
 - 26.5a
 
 ==============================================================================
-9. TABLE OF CONTENTS RULES
+10. TABLE OF CONTENTS RULES
 ==============================================================================
 
 Internal links are created only from contents blocks.
@@ -465,7 +505,7 @@ This means the old duplicate-bookmark problem is largely eliminated by the
 parser itself.
 
 ==============================================================================
-10. USAGE AND DEBUG MODE
+11. USAGE AND DEBUG MODE
 ==============================================================================
 
 Basic usage:
@@ -515,6 +555,7 @@ Debug mode prints diagnostics to stderr.
 It reports:
 - detected encoding
 - selected font
+- the font auto-detection decision (CJK pipeline vs Base14)
 - compression mode and level
 - PDF version and object-stream mode
 - lines marked as part of a contents block
@@ -537,7 +578,7 @@ Use debug mode when:
 - you are adapting a new readme to the Spartan format
 
 ==============================================================================
-11. MINIMAL WORKING STRUCTURE
+12. MINIMAL WORKING STRUCTURE
 ==============================================================================
 
 A minimal compatible document needs three things:
@@ -560,7 +601,7 @@ Do not wrap example headers with separator lines unless you want them to
 become real bookmarks.
 
 ==============================================================================
-12. PDF INTERNALS
+13. PDF INTERNALS
 ==============================================================================
 
 txt2pdf generates a valid PDF 1.5 structure by default. Legacy PDF 1.4
@@ -630,7 +671,7 @@ Offsets are computed after compression, so they always point to the exact
 start of each object.
 
 ==============================================================================
-13. PROJECT STRUCTURE
+14. PROJECT STRUCTURE
 ==============================================================================
 
 The txt2pdf codebase follows a single-file architecture plus one vendored
@@ -662,7 +703,7 @@ The main C file contains:
 The tool is intentionally small and auditable.
 
 ==============================================================================
-14. BUILDING AND STATIC COOKBOOK
+15. BUILDING AND STATIC COOKBOOK
 ==============================================================================
 
 Provided build script:
@@ -730,7 +771,7 @@ Force a libdeflate rebuild:
   ./compile.sh
 
 ==============================================================================
-15. KNOWN LIMITATIONS
+16. KNOWN LIMITATIONS
 ==============================================================================
 
 General:
@@ -763,6 +804,8 @@ Base14 mode:
 
 CJK mode:
 - Requires an individual TrueType .ttf file.
+- Since v1.9.2, --font is auto-detected: documents without CJK
+  codepoints keep the Base14 font (nothing is embedded).
 - OpenType/CFF .otf files are not supported yet.
 - TrueType collections .ttc are not supported yet.
 - No automatic per-script font fallback.
@@ -781,8 +824,14 @@ Parser:
 - Internal links are only generated from contents blocks.
 
 ==============================================================================
-16. TROUBLESHOOTING
+17. TROUBLESHOOTING
 ==============================================================================
+
+--font seems to be ignored:
+- Since v1.9.2, --font only activates when the document contains
+  real CJK codepoints. Run with --debug to see the decision.
+- Isolated emoji/symbols do not activate the TrueType pipeline;
+  they are printed as '?' in Base14 mode.
 
 Bookmarks and Internal links counts differ:
 - A section header has no entry in the contents block (or vice versa).
@@ -879,7 +928,7 @@ Font does not look as expected:
 Debug output is the fastest way to diagnose the problem.
 
 ==============================================================================
-f17. COMPARISON AND DESIGN PHILOSOPHY
+18. COMPARISON AND DESIGN PHILOSOPHY
 ==============================================================================
 If you just need to generate a structured PDF from raw text, code, or logs,
 using massive office suites or complex pipelines is like using a rocket
@@ -929,14 +978,16 @@ With v1.7.2, it gained subsetted TrueType embedding for real Unicode CJK
 text. 
 With v1.8.0, it squeezed every text stream through libdeflate at
 level 12 and turned every URL into a clickable link. 
+
 With v1.9.0, it eliminated the need for qpdf by generating native PDF 1.5 object streams
 directly. 
+
 And with v1.9.1, it added image DPI awareness, per-image
 centering, accurate file size reporting, and a cleaner, strictly spartan
 codebase.
 
 ==============================================================================
-18. LICENSE AND CREDITS
+19. LICENSE AND CREDITS
 ==============================================================================
 
 Source code : GPLv3
